@@ -1,0 +1,59 @@
+[package]
+name = "pique"
+version = "0.1.0"
+edition = "2024"
+description = "Parquet Index for Queries — immutable secondary indexes for analytical datasets on object storage"
+license = "Apache-2.0"
+# Standalone crate — no internal workspace dependencies. Future OSS extraction.
+
+[dependencies]
+# FST for the sparse key directory layer
+fst = "0.4"
+
+# Bloom filter (Xor filter — lower false positive rate than classic bloom at same size)
+xorf = { version = "0.11", features = ["serde"] }
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Byte manipulation
+bytes = "1"
+
+# Serialization for metadata
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+# Async trait (for storage backend)
+async-trait = "0.1"
+
+# AWS S3 (optional — for the S3 storage backend)
+aws-sdk-s3 = { version = "1", optional = true }
+aws-config = { version = "1", optional = true }
+
+# CRC32 checksums for block integrity
+crc32fast = "1"
+
+# Hashing for bloom filter key fingerprints
+xxhash-rust = { version = "0.8", features = ["xxh3"] }
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["async_tokio"] }
+rand = "0.8"
+tempfile = "3"
+tokio-test = "0.4"
+
+[features]
+default = []
+s3 = ["aws-sdk-s3", "aws-config"]
+
+[[bench]]
+name = "segment"
+harness = false
+
+[[example]]
+name = "measure_s3"
+required-features = ["s3"]
