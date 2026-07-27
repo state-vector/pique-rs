@@ -104,9 +104,53 @@ let result = reader.get(b"user_002").await?;
 
 ## Project status
 
-Pique is in production use at [State Vector](https://statevector.co), powering code entity lookups and graph traversal over indexed codebases. The format is expected to evolve while we validate the API and performance characteristics at scale.
+Pique is in production use at [Superpositional](https://superpositional.io), powering code entity lookups and graph traversal over indexed codebases. The format is expected to evolve while we validate the API and performance characteristics at scale.
 
 Contributions, benchmarking, and design discussion are welcome.
+
+## Installation
+
+Add to your `Cargo.toml`:
+
+```toml
+[dependencies]
+pique = { git = "https://github.com/state-vector/pique-rs" }
+
+# With S3 support:
+pique = { git = "https://github.com/state-vector/pique-rs", features = ["s3"] }
+```
+
+## Running the benchmarks
+
+Pique includes a Criterion benchmark suite that measures build time, lookup latency, bloom rejection, and block size trade-offs across various dataset sizes.
+
+```bash
+# Clone the repo
+git clone https://github.com/state-vector/pique-rs.git
+cd pique-rs
+
+# Run all benchmarks (builds in release mode)
+cargo bench
+
+# Run specific benchmark groups
+cargo bench -- "point_lookup"
+cargo bench -- "layered"
+cargo bench -- "merge"
+cargo bench -- "bloom"
+```
+
+To measure real S3 latency (requires AWS credentials and a bucket):
+
+```bash
+# Set your test bucket
+export OSI_TEST_BUCKET=your-bucket-name
+export AWS_REGION=us-east-1
+
+# Run the S3 measurement example
+cargo run --release --example measure_s3 --features s3
+```
+
+This uploads test segments of various sizes and measures range-read latency, connection warmup effects, and the difference between full-object reads vs targeted range requests.
 
 ## License
 
