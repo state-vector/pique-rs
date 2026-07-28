@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2024"
 description = "Parquet Index for Queries — immutable secondary indexes for analytical datasets on object storage"
 license = "MIT"
+repository = "https://github.com/state-vector/pique-rs"
+keywords = ["parquet", "index", "analytics", "s3", "object-storage"]
+categories = ["database"]
 # Standalone crate — no internal workspace dependencies. Future OSS extraction.
 
 [dependencies]
