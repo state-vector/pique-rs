@@ -8,7 +8,7 @@
 //!
 //! Run with: cargo bench
 
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use osi::{SegmentReader, SegmentWriter, SegmentWriterOptions};
 
 /// Generate synthetic entity IDs that match our real workload pattern.
@@ -27,10 +27,7 @@ fn generate_entity_keys(count: usize) -> Vec<String> {
     let mut keys: Vec<String> = (0..count)
         .map(|i| {
             let module = modules[i % modules.len()];
-            format!(
-                "acme/myproject::{}::function::fn_{:06}",
-                module, i
-            )
+            format!("acme/myproject::{}::function::fn_{:06}", module, i)
         })
         .collect();
 
@@ -181,7 +178,11 @@ fn bench_block_sizes(c: &mut Criterion) {
         group.throughput(Throughput::Elements(1));
         group.bench_with_input(
             BenchmarkId::new(
-                format!("lookup_{}KB_seg{}KB", block_size / 1024, segment_size / 1024),
+                format!(
+                    "lookup_{}KB_seg{}KB",
+                    block_size / 1024,
+                    segment_size / 1024
+                ),
                 block_size,
             ),
             &(keys.clone(), reader),
@@ -269,7 +270,12 @@ fn build_layered_test_data(
     base_count: usize,
     delta_count: usize,
     keys_per_delta: usize,
-) -> (SegmentReader, Vec<SegmentReader>, Vec<String>, Vec<Vec<String>>) {
+) -> (
+    SegmentReader,
+    Vec<SegmentReader>,
+    Vec<String>,
+    Vec<Vec<String>>,
+) {
     let base_keys = generate_entity_keys(base_count);
 
     // Build base segment
@@ -311,10 +317,7 @@ fn build_layered_test_data(
 
         // Other half are new keys (not in base)
         for i in update_count..keys_per_delta {
-            let key = format!(
-                "acme/myproject::src/new_module/delta_{}/fn_{:06}",
-                d, i
-            );
+            let key = format!("acme/myproject::src/new_module/delta_{}/fn_{:06}", d, i);
             let val = format!("delta_{}_new_{:06}", d, i).into_bytes();
             entries.push((key.clone(), val));
             delta_keys.push(key);
@@ -480,8 +483,4 @@ fn bench_merge(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(
-    layered_benches,
-    bench_layered_lookup,
-    bench_merge,
-);
+criterion_group!(layered_benches, bench_layered_lookup, bench_merge,);

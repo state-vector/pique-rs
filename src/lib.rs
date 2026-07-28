@@ -45,15 +45,14 @@ pub mod values;
 pub mod writer;
 
 // Re-export key public types
-pub use format::{Footer, SegmentMeta, MAGIC, FORMAT_VERSION};
-pub use reader::{SegmentReader, SegmentMetadata, RemoteSegmentReader, ReaderError};
-pub use writer::{SegmentWriter, SegmentWriterOptions, SegmentOutput};
-pub use storage::{StorageBackend, LocalBackend, StorageError};
+pub use format::{FORMAT_VERSION, Footer, MAGIC, SegmentMeta};
 pub use layered::{
-    LayeredReader, RemoteLayeredReader, LayeredIndexManifest, SegmentRef,
-    merge_segments, tombstone_value, is_tombstone,
-    TOMBSTONE_MARKER, MAX_DELTA_COUNT, MAX_DELTA_RATIO,
+    LayeredIndexManifest, LayeredReader, MAX_DELTA_COUNT, MAX_DELTA_RATIO, RemoteLayeredReader,
+    SegmentRef, TOMBSTONE_MARKER, is_tombstone, merge_segments, tombstone_value,
 };
+pub use reader::{ReaderError, RemoteSegmentReader, SegmentMetadata, SegmentReader};
+pub use storage::{LocalBackend, StorageBackend, StorageError};
+pub use writer::{SegmentOutput, SegmentWriter, SegmentWriterOptions};
 
 #[cfg(feature = "s3")]
 pub use storage::S3Backend;

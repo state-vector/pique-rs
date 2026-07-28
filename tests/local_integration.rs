@@ -4,12 +4,10 @@
 //! This validates the full write → store → range-read → lookup flow without
 //! needing S3 or MinIO.
 
-use osi::{
-    LocalBackend, SegmentReader, SegmentWriter, SegmentWriterOptions, StorageBackend,
-};
-use osi::format::{Footer, FOOTER_SIZE};
-use osi::values::entity_location::EntityLocation;
+use osi::format::{FOOTER_SIZE, Footer};
 use osi::values::adjacency::{AdjacencyList, Edge, RelKind};
+use osi::values::entity_location::EntityLocation;
+use osi::{LocalBackend, SegmentReader, SegmentWriter, SegmentWriterOptions, StorageBackend};
 use tempfile::TempDir;
 
 /// End-to-end: build segment → write via backend → read via range reads → lookup.
@@ -30,7 +28,8 @@ async fn write_and_read_via_local_backend() {
         .map(|i| {
             let key = format!(
                 "acme/myproject::src/query/src/mod_{:03}.rs::function::fn_{:04}",
-                i / 10, i
+                i / 10,
+                i
             );
             let loc = EntityLocation {
                 file_key: format!("data/org1/entities/part-{:05}.parquet", i / 100),
@@ -50,12 +49,18 @@ async fn write_and_read_via_local_backend() {
     let output = writer.finish().unwrap();
 
     // --- Write to local backend ---
-    backend.put(segment_path, output.data.clone()).await.unwrap();
+    backend
+        .put(segment_path, output.data.clone())
+        .await
+        .unwrap();
 
     // --- Read back via range reads (simulating S3 access pattern) ---
 
     // Step 1: Read footer (last 64 bytes)
-    let footer_bytes = backend.read_tail(segment_path, FOOTER_SIZE as u64).await.unwrap();
+    let footer_bytes = backend
+        .read_tail(segment_path, FOOTER_SIZE as u64)
+        .await
+        .unwrap();
     let footer = Footer::from_bytes(footer_bytes.as_slice().try_into().unwrap()).unwrap();
     assert_eq!(footer.key_count, 500);
 
@@ -78,7 +83,11 @@ async fn write_and_read_via_local_backend() {
         let result = reader.get(key.as_bytes()).unwrap();
         assert!(result.is_some(), "Key not found: {}", key);
         let decoded_loc = EntityLocation::decode(&result.unwrap()).unwrap();
-        assert_eq!(&decoded_loc, expected_loc, "Wrong location for key: {}", key);
+        assert_eq!(
+            &decoded_loc, expected_loc,
+            "Wrong location for key: {}",
+            key
+        );
     }
 
     // Verify non-existent keys
@@ -100,7 +109,11 @@ async fn adjacency_index_via_local_backend() {
             let outgoing: Vec<Edge> = (0..((i % 20) + 1))
                 .map(|j| Edge {
                     entity_id: format!("repo::src/dep_{:03}.rs::function::helper_{:04}", j, j),
-                    rel_kind: if j % 3 == 0 { RelKind::Calls } else { RelKind::Imports },
+                    rel_kind: if j % 3 == 0 {
+                        RelKind::Calls
+                    } else {
+                        RelKind::Imports
+                    },
                 })
                 .collect();
             let incoming: Vec<Edge> = (0..((i % 5) + 1))
@@ -200,13 +213,19 @@ async fn simulated_range_read_pattern() {
     // Simulate S3 access pattern:
     // Request 1: Read footer (last 64 bytes)
     let size = backend.object_size(segment_path).await.unwrap();
-    let footer_data = backend.read_range(segment_path, size - 64..size).await.unwrap();
+    let footer_data = backend
+        .read_range(segment_path, size - 64..size)
+        .await
+        .unwrap();
     let footer = Footer::from_bytes(footer_data.as_slice().try_into().unwrap()).unwrap();
 
     // Request 2: Read FST + bloom into memory (cached for all subsequent lookups)
     let meta_start = footer.bloom_offset;
     let meta_end = footer.fst_offset + footer.fst_length;
-    let _meta_bytes = backend.read_range(segment_path, meta_start..meta_end).await.unwrap();
+    let _meta_bytes = backend
+        .read_range(segment_path, meta_start..meta_end)
+        .await
+        .unwrap();
 
     // Request 3+: Individual block reads per lookup
     // (In this test we just verify the pattern works — actual block-level reads
@@ -216,8 +235,17 @@ async fn simulated_range_read_pattern() {
     let full_data = backend.read_all(segment_path).await.unwrap();
     let reader = SegmentReader::open(full_data).unwrap();
 
-    assert_eq!(reader.get(b"entity_000000").unwrap(), Some(b"location_000000".to_vec()));
-    assert_eq!(reader.get(b"entity_000500").unwrap(), Some(b"location_000500".to_vec()));
-    assert_eq!(reader.get(b"entity_000999").unwrap(), Some(b"location_000999".to_vec()));
+    assert_eq!(
+        reader.get(b"entity_000000").unwrap(),
+        Some(b"location_000000".to_vec())
+    );
+    assert_eq!(
+        reader.get(b"entity_000500").unwrap(),
+        Some(b"location_000500".to_vec())
+    );
+    assert_eq!(
+        reader.get(b"entity_000999").unwrap(),
+        Some(b"location_000999".to_vec())
+    );
     assert_eq!(reader.get(b"entity_001000").unwrap(), None);
 }

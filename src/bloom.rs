@@ -154,8 +154,16 @@ mod tests {
 
         // Size should be roughly 10000 * 1.23 bytes (XOR8 overhead)
         // Plus 16 bytes metadata
-        assert!(filter_bytes.len() < 15_000, "Filter too large: {}", filter_bytes.len());
-        assert!(filter_bytes.len() > 10_000, "Filter suspiciously small: {}", filter_bytes.len());
+        assert!(
+            filter_bytes.len() < 15_000,
+            "Filter too large: {}",
+            filter_bytes.len()
+        );
+        assert!(
+            filter_bytes.len() > 10_000,
+            "Filter suspiciously small: {}",
+            filter_bytes.len()
+        );
 
         // Spot-check membership
         assert!(might_contain(&filter_bytes, keys[0].as_slice()));

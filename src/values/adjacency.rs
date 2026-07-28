@@ -71,7 +71,11 @@ impl RelKind {
         }
     }
 
-    fn from_byte(byte: u8, data: &[u8], pos: &mut usize) -> Result<Self, super::entity_location::ValueDecodeError> {
+    fn from_byte(
+        byte: u8,
+        data: &[u8],
+        pos: &mut usize,
+    ) -> Result<Self, super::entity_location::ValueDecodeError> {
         use super::entity_location::ValueDecodeError;
         match byte {
             0 => Ok(RelKind::Calls),
@@ -165,7 +169,10 @@ fn encode_edge(buf: &mut Vec<u8>, edge: &Edge) {
     }
 }
 
-fn decode_edge(data: &[u8], pos: &mut usize) -> Result<Edge, super::entity_location::ValueDecodeError> {
+fn decode_edge(
+    data: &[u8],
+    pos: &mut usize,
+) -> Result<Edge, super::entity_location::ValueDecodeError> {
     use super::entity_location::ValueDecodeError;
 
     if *pos + 2 > data.len() {
@@ -189,7 +196,10 @@ fn decode_edge(data: &[u8], pos: &mut usize) -> Result<Edge, super::entity_locat
 
     let rel_kind = RelKind::from_byte(kind_byte, data, pos)?;
 
-    Ok(Edge { entity_id, rel_kind })
+    Ok(Edge {
+        entity_id,
+        rel_kind,
+    })
 }
 
 #[cfg(test)]
@@ -200,12 +210,19 @@ mod tests {
     fn round_trip_simple() {
         let adj = AdjacencyList {
             outgoing: vec![
-                Edge { entity_id: "pkg::mod_a::fn_foo".into(), rel_kind: RelKind::Calls },
-                Edge { entity_id: "pkg::mod_b::struct_Bar".into(), rel_kind: RelKind::Uses },
+                Edge {
+                    entity_id: "pkg::mod_a::fn_foo".into(),
+                    rel_kind: RelKind::Calls,
+                },
+                Edge {
+                    entity_id: "pkg::mod_b::struct_Bar".into(),
+                    rel_kind: RelKind::Uses,
+                },
             ],
-            incoming: vec![
-                Edge { entity_id: "pkg::mod_c::fn_main".into(), rel_kind: RelKind::Calls },
-            ],
+            incoming: vec![Edge {
+                entity_id: "pkg::mod_c::fn_main".into(),
+                rel_kind: RelKind::Calls,
+            }],
         };
 
         let encoded = adj.encode();
@@ -216,12 +233,10 @@ mod tests {
     #[test]
     fn round_trip_custom_kind() {
         let adj = AdjacencyList {
-            outgoing: vec![
-                Edge {
-                    entity_id: "some::entity".into(),
-                    rel_kind: RelKind::Custom("delegates_to".into()),
-                },
-            ],
+            outgoing: vec![Edge {
+                entity_id: "some::entity".into(),
+                rel_kind: RelKind::Custom("delegates_to".into()),
+            }],
             incoming: vec![],
         };
 
@@ -248,7 +263,10 @@ mod tests {
         // Simulate a heavily-connected entity (200 outgoing edges)
         let outgoing: Vec<Edge> = (0..200)
             .map(|i| Edge {
-                entity_id: format!("acme/myproject::src/query/src/translation.rs::function::helper_{:04}", i),
+                entity_id: format!(
+                    "acme/myproject::src/query/src/translation.rs::function::helper_{:04}",
+                    i
+                ),
                 rel_kind: RelKind::Calls,
             })
             .collect();

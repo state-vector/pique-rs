@@ -57,12 +57,8 @@ impl EntityLocation {
             .to_string();
 
         let rg_offset = 2 + file_key_len;
-        let row_group = u32::from_le_bytes(
-            data[rg_offset..rg_offset + 4].try_into().unwrap(),
-        );
-        let row_offset = u32::from_le_bytes(
-            data[rg_offset + 4..rg_offset + 8].try_into().unwrap(),
-        );
+        let row_group = u32::from_le_bytes(data[rg_offset..rg_offset + 4].try_into().unwrap());
+        let row_offset = u32::from_le_bytes(data[rg_offset + 4..rg_offset + 8].try_into().unwrap());
 
         Ok(EntityLocation {
             file_key,

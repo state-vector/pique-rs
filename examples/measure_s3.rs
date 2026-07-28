@@ -29,16 +29,15 @@
 //! Produces a table of latency measurements (p50, p95, p99, mean) for each
 //! access pattern, plus segment metadata (size, key count, block count).
 
-use osi::{SegmentWriter, SegmentWriterOptions, S3Backend, StorageBackend};
-use osi::format::{Footer, FOOTER_SIZE};
+use osi::format::{FOOTER_SIZE, Footer};
+use osi::{S3Backend, SegmentWriter, SegmentWriterOptions, StorageBackend};
 use std::time::{Duration, Instant};
 
 #[tokio::main]
 async fn main() {
-    let bucket = std::env::var("OSI_TEST_BUCKET")
-        .expect("Set OSI_TEST_BUCKET to a real S3 bucket name");
-    let region = std::env::var("AWS_REGION")
-        .unwrap_or_else(|_| "ap-southeast-2".to_string());
+    let bucket =
+        std::env::var("OSI_TEST_BUCKET").expect("Set OSI_TEST_BUCKET to a real S3 bucket name");
+    let region = std::env::var("AWS_REGION").unwrap_or_else(|_| "ap-southeast-2".to_string());
 
     println!("=== OSI Real-World S3 Latency Measurement ===");
     println!("Bucket: {bucket}");
@@ -50,31 +49,78 @@ async fn main() {
 
     // Build test segments of various sizes
     let configs = vec![
-        SegmentConfig { name: "small", key_count: 1_000, block_size: 64 * 1024, value_size: 50 },
-        SegmentConfig { name: "medium", key_count: 10_000, block_size: 64 * 1024, value_size: 50 },
-        SegmentConfig { name: "large", key_count: 100_000, block_size: 64 * 1024, value_size: 50 },
-        SegmentConfig { name: "adjacency", key_count: 10_000, block_size: 64 * 1024, value_size: 500 },
+        SegmentConfig {
+            name: "small",
+            key_count: 1_000,
+            block_size: 64 * 1024,
+            value_size: 50,
+        },
+        SegmentConfig {
+            name: "medium",
+            key_count: 10_000,
+            block_size: 64 * 1024,
+            value_size: 50,
+        },
+        SegmentConfig {
+            name: "large",
+            key_count: 100_000,
+            block_size: 64 * 1024,
+            value_size: 50,
+        },
+        SegmentConfig {
+            name: "adjacency",
+            key_count: 10_000,
+            block_size: 64 * 1024,
+            value_size: 500,
+        },
         // Block size variants (all 50K keys)
-        SegmentConfig { name: "block_4k", key_count: 50_000, block_size: 4 * 1024, value_size: 50 },
-        SegmentConfig { name: "block_16k", key_count: 50_000, block_size: 16 * 1024, value_size: 50 },
-        SegmentConfig { name: "block_64k", key_count: 50_000, block_size: 64 * 1024, value_size: 50 },
-        SegmentConfig { name: "block_256k", key_count: 50_000, block_size: 256 * 1024, value_size: 50 },
+        SegmentConfig {
+            name: "block_4k",
+            key_count: 50_000,
+            block_size: 4 * 1024,
+            value_size: 50,
+        },
+        SegmentConfig {
+            name: "block_16k",
+            key_count: 50_000,
+            block_size: 16 * 1024,
+            value_size: 50,
+        },
+        SegmentConfig {
+            name: "block_64k",
+            key_count: 50_000,
+            block_size: 64 * 1024,
+            value_size: 50,
+        },
+        SegmentConfig {
+            name: "block_256k",
+            key_count: 50_000,
+            block_size: 256 * 1024,
+            value_size: 50,
+        },
     ];
 
     let prefix = format!("osi-bench/{}", timestamp_id());
 
     for config in &configs {
-        println!("--- Segment: {} ({} keys, {}KB blocks, {}B values) ---",
-            config.name, config.key_count, config.block_size / 1024, config.value_size);
+        println!(
+            "--- Segment: {} ({} keys, {}KB blocks, {}B values) ---",
+            config.name,
+            config.key_count,
+            config.block_size / 1024,
+            config.value_size
+        );
 
         let segment_path = format!("{}/{}.osi", prefix, config.name);
 
         // Build and upload
         let (segment_data, keys) = build_segment(config);
         let segment_size = segment_data.len();
-        println!("  Segment size: {:.1} KB ({:.1} MB)",
+        println!(
+            "  Segment size: {:.1} KB ({:.1} MB)",
             segment_size as f64 / 1024.0,
-            segment_size as f64 / (1024.0 * 1024.0));
+            segment_size as f64 / (1024.0 * 1024.0)
+        );
 
         let upload_start = Instant::now();
         if let Err(e) = backend.put(&segment_path, segment_data).await {
@@ -89,35 +135,53 @@ async fn main() {
         // Pattern 1: Footer read (last 64 bytes) — "what is this segment?"
         let footer_latencies = measure_repeated(10, || async {
             let start = Instant::now();
-            let _ = backend.read_tail(&segment_path, FOOTER_SIZE as u64).await.unwrap();
+            let _ = backend
+                .read_tail(&segment_path, FOOTER_SIZE as u64)
+                .await
+                .unwrap();
             start.elapsed()
-        }).await;
+        })
+        .await;
         print_stats("  Footer (64B)", &footer_latencies);
 
         // Parse footer for subsequent reads
-        let footer_bytes = backend.read_tail(&segment_path, FOOTER_SIZE as u64).await.unwrap();
+        let footer_bytes = backend
+            .read_tail(&segment_path, FOOTER_SIZE as u64)
+            .await
+            .unwrap();
         let footer = Footer::from_bytes(footer_bytes.as_slice().try_into().unwrap()).unwrap();
 
         // Pattern 2: Directory read (bloom + FST)
         let dir_size = footer.bloom_length + footer.fst_length;
         let dir_latencies = measure_repeated(10, || async {
             let start = Instant::now();
-            let _ = backend.read_range(
-                &segment_path,
-                footer.bloom_offset..footer.fst_offset + footer.fst_length,
-            ).await.unwrap();
+            let _ = backend
+                .read_range(
+                    &segment_path,
+                    footer.bloom_offset..footer.fst_offset + footer.fst_length,
+                )
+                .await
+                .unwrap();
             start.elapsed()
-        }).await;
-        print_stats(&format!("  Directory ({:.1}KB)", dir_size as f64 / 1024.0), &dir_latencies);
+        })
+        .await;
+        print_stats(
+            &format!("  Directory ({:.1}KB)", dir_size as f64 / 1024.0),
+            &dir_latencies,
+        );
 
         // Pattern 3: Single 64KB block read (from the middle of the segment)
         let mid_offset = footer.data_blocks_length / 2;
         let block_end = (mid_offset + 65536).min(footer.data_blocks_length);
         let block_latencies = measure_repeated(20, || async {
             let start = Instant::now();
-            let _ = backend.read_range(&segment_path, mid_offset..block_end).await.unwrap();
+            let _ = backend
+                .read_range(&segment_path, mid_offset..block_end)
+                .await
+                .unwrap();
             start.elapsed()
-        }).await;
+        })
+        .await;
         print_stats("  Block (64KB)", &block_latencies);
 
         // Pattern 4: Small range read (4KB) — minimum useful read
@@ -125,7 +189,8 @@ async fn main() {
             let start = Instant::now();
             let _ = backend.read_range(&segment_path, 0..4096).await.unwrap();
             start.elapsed()
-        }).await;
+        })
+        .await;
         print_stats("  Small (4KB)", &small_latencies);
 
         // Pattern 5: Full segment read (baseline — what we'd pay without range reads)
@@ -133,41 +198,61 @@ async fn main() {
             let start = Instant::now();
             let _ = backend.read_all(&segment_path).await.unwrap();
             start.elapsed()
-        }).await;
-        print_stats(&format!("  Full ({:.1}KB)", segment_size as f64 / 1024.0), &full_latencies);
+        })
+        .await;
+        print_stats(
+            &format!("  Full ({:.1}KB)", segment_size as f64 / 1024.0),
+            &full_latencies,
+        );
 
         // Pattern 6: End-to-end point lookup simulation
         // (footer + directory + one block — the complete cold-lookup pattern)
         let e2e_latencies = measure_repeated(10, || async {
             let start = Instant::now();
             // Step 1: footer
-            let _ = backend.read_tail(&segment_path, FOOTER_SIZE as u64).await.unwrap();
+            let _ = backend
+                .read_tail(&segment_path, FOOTER_SIZE as u64)
+                .await
+                .unwrap();
             // Step 2: directory
-            let _ = backend.read_range(
-                &segment_path,
-                footer.bloom_offset..footer.fst_offset + footer.fst_length,
-            ).await.unwrap();
+            let _ = backend
+                .read_range(
+                    &segment_path,
+                    footer.bloom_offset..footer.fst_offset + footer.fst_length,
+                )
+                .await
+                .unwrap();
             // Step 3: one data block
-            let _ = backend.read_range(&segment_path, mid_offset..block_end).await.unwrap();
+            let _ = backend
+                .read_range(&segment_path, mid_offset..block_end)
+                .await
+                .unwrap();
             start.elapsed()
-        }).await;
+        })
+        .await;
         print_stats("  E2E cold (3 reqs)", &e2e_latencies);
 
         // Pattern 7: Warm lookup simulation (directory already cached, just block)
         let warm_latencies = measure_repeated(20, || async {
             let start = Instant::now();
-            let _ = backend.read_range(&segment_path, mid_offset..block_end).await.unwrap();
+            let _ = backend
+                .read_range(&segment_path, mid_offset..block_end)
+                .await
+                .unwrap();
             start.elapsed()
-        }).await;
+        })
+        .await;
         print_stats("  E2E warm (1 req)", &warm_latencies);
 
         // Connection warmup analysis: compare first request vs rest
         println!("  Connection warmup:");
         if footer_latencies.len() >= 3 {
             println!("    First request: {}ms", footer_latencies[0].as_millis());
-            let rest_avg: f64 = footer_latencies[1..].iter()
+            let rest_avg: f64 = footer_latencies[1..]
+                .iter()
                 .map(|d| d.as_millis() as f64)
-                .sum::<f64>() / (footer_latencies.len() - 1) as f64;
+                .sum::<f64>()
+                / (footer_latencies.len() - 1) as f64;
             println!("    Subsequent avg: {:.1}ms", rest_avg);
         }
 
@@ -263,7 +348,10 @@ fn print_stats(label: &str, durations: &[Duration]) {
     let min = ms[0];
     let max = *ms.last().unwrap();
 
-    println!("{label}: mean={mean:.1}ms p50={p50:.1}ms p95={p95:.1}ms min={min:.1}ms max={max:.1}ms (n={})", ms.len());
+    println!(
+        "{label}: mean={mean:.1}ms p50={p50:.1}ms p95={p95:.1}ms min={min:.1}ms max={max:.1}ms (n={})",
+        ms.len()
+    );
 }
 
 fn timestamp_id() -> String {

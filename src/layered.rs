@@ -30,7 +30,7 @@
 //! deleted in this delta and should not be visible even if it exists in an
 //! older segment.
 
-use crate::reader::{RemoteSegmentReader, SegmentReader, ReaderError};
+use crate::reader::{ReaderError, RemoteSegmentReader, SegmentReader};
 use crate::storage::StorageBackend;
 
 /// Tombstone marker — first byte of a value that indicates deletion.
@@ -213,8 +213,8 @@ impl RemoteLayeredReader {
 ///
 /// Returns the merged segment bytes (ready to upload as a new base).
 pub fn merge_segments(segments: &[SegmentReader]) -> Result<Vec<u8>, ReaderError> {
-    use std::collections::BTreeMap;
     use crate::writer::{SegmentWriter, SegmentWriterOptions};
+    use std::collections::BTreeMap;
 
     // Collect all key-value pairs. Newest segment wins for duplicates.
     // BTreeMap gives us sorted iteration for free.
@@ -241,14 +241,14 @@ pub fn merge_segments(segments: &[SegmentReader]) -> Result<Vec<u8>, ReaderError
     });
 
     for (key, value) in &merged {
-        writer.add(key, value).map_err(|e| {
-            ReaderError::FstError(format!("merge write error: {}", e))
-        })?;
+        writer
+            .add(key, value)
+            .map_err(|e| ReaderError::FstError(format!("merge write error: {}", e)))?;
     }
 
-    let output = writer.finish().map_err(|e| {
-        ReaderError::FstError(format!("merge finish error: {}", e))
-    })?;
+    let output = writer
+        .finish()
+        .map_err(|e| ReaderError::FstError(format!("merge finish error: {}", e)))?;
 
     Ok(output.data)
 }
@@ -257,7 +257,7 @@ pub fn merge_segments(segments: &[SegmentReader]) -> Result<Vec<u8>, ReaderError
 // Manifest types for layered indexes
 // ---------------------------------------------------------------------------
 
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 /// Manifest entry for a layered index.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -284,14 +284,12 @@ pub struct SegmentRef {
 impl LayeredIndexManifest {
     /// Total key count (upper bound — includes duplicates across layers).
     pub fn total_keys_upper_bound(&self) -> u64 {
-        self.base.key_count as u64
-            + self.deltas.iter().map(|d| d.key_count as u64).sum::<u64>()
+        self.base.key_count as u64 + self.deltas.iter().map(|d| d.key_count as u64).sum::<u64>()
     }
 
     /// Total storage bytes.
     pub fn total_size_bytes(&self) -> u64 {
-        self.base.size_bytes
-            + self.deltas.iter().map(|d| d.size_bytes).sum::<u64>()
+        self.base.size_bytes + self.deltas.iter().map(|d| d.size_bytes).sum::<u64>()
     }
 
     /// Number of delta segments.
@@ -350,9 +348,7 @@ mod tests {
             (b"key_b", b"base_value_b"),
             (b"key_c", b"base_value_c"),
         ]);
-        let delta = build_segment(&[
-            (b"key_b", b"updated_value_b"),
-        ]);
+        let delta = build_segment(&[(b"key_b", b"updated_value_b")]);
 
         let base_reader = SegmentReader::open(base).unwrap();
         let delta_reader = SegmentReader::open(delta).unwrap();
@@ -361,11 +357,20 @@ mod tests {
         let layered = LayeredReader::new(vec![delta_reader, base_reader]);
 
         // key_b comes from delta (shadowed)
-        assert_eq!(layered.get(b"key_b").unwrap(), Some(b"updated_value_b".to_vec()));
+        assert_eq!(
+            layered.get(b"key_b").unwrap(),
+            Some(b"updated_value_b".to_vec())
+        );
         // key_a comes from base (not in delta)
-        assert_eq!(layered.get(b"key_a").unwrap(), Some(b"base_value_a".to_vec()));
+        assert_eq!(
+            layered.get(b"key_a").unwrap(),
+            Some(b"base_value_a".to_vec())
+        );
         // key_c comes from base
-        assert_eq!(layered.get(b"key_c").unwrap(), Some(b"base_value_c".to_vec()));
+        assert_eq!(
+            layered.get(b"key_c").unwrap(),
+            Some(b"base_value_c".to_vec())
+        );
     }
 
     #[test]
@@ -376,9 +381,7 @@ mod tests {
             (b"key_c", b"value_c"),
         ]);
         // Delta tombstones key_b
-        let delta = build_segment(&[
-            (b"key_b", &tombstone_value()),
-        ]);
+        let delta = build_segment(&[(b"key_b", &tombstone_value())]);
 
         let base_reader = SegmentReader::open(base).unwrap();
         let delta_reader = SegmentReader::open(delta).unwrap();
@@ -393,17 +396,13 @@ mod tests {
 
     #[test]
     fn layered_reader_multiple_deltas() {
-        let base = build_segment(&[
-            (b"key_a", b"v1"),
-            (b"key_b", b"v1"),
-            (b"key_c", b"v1"),
-        ]);
+        let base = build_segment(&[(b"key_a", b"v1"), (b"key_b", b"v1"), (b"key_c", b"v1")]);
         let delta1 = build_segment(&[
-            (b"key_a", b"v2"),  // updated in delta1
+            (b"key_a", b"v2"), // updated in delta1
         ]);
         let delta2 = build_segment(&[
-            (b"key_a", b"v3"),  // updated again in delta2 (newest)
-            (b"key_d", b"v1_new"),  // new key in delta2
+            (b"key_a", b"v3"),     // updated again in delta2 (newest)
+            (b"key_d", b"v1_new"), // new key in delta2
         ]);
 
         let base_r = SegmentReader::open(base).unwrap();
@@ -428,8 +427,8 @@ mod tests {
             (b"key_c", b"value_c"),
         ]);
         let delta = build_segment(&[
-            (b"key_b", &tombstone_value()),  // delete key_b
-            (b"key_d", b"value_d"),           // add key_d
+            (b"key_b", &tombstone_value()), // delete key_b
+            (b"key_d", b"value_d"),         // add key_d
         ]);
 
         let base_r = SegmentReader::open(base).unwrap();
@@ -448,12 +447,8 @@ mod tests {
 
     #[test]
     fn merge_newest_value_wins() {
-        let base = build_segment(&[
-            (b"key_x", b"old"),
-        ]);
-        let delta = build_segment(&[
-            (b"key_x", b"new"),
-        ]);
+        let base = build_segment(&[(b"key_x", b"old")]);
+        let delta = build_segment(&[(b"key_x", b"new")]);
 
         let base_r = SegmentReader::open(base).unwrap();
         let delta_r = SegmentReader::open(delta).unwrap();
@@ -532,9 +527,7 @@ mod tests {
             (b"base_003", b"v3"),
         ]);
         // Build a delta with keys starting with "delta_"
-        let delta = build_segment(&[
-            (b"delta_001", b"v1"),
-        ]);
+        let delta = build_segment(&[(b"delta_001", b"v1")]);
 
         let base_r = SegmentReader::open(base).unwrap();
         let delta_r = SegmentReader::open(delta).unwrap();

@@ -32,8 +32,6 @@
 //!
 //! At restart points, `shared_prefix_len` is always 0 (full key stored).
 
-
-
 // ---------------------------------------------------------------------------
 // Varint encoding (LEB128 unsigned)
 // ---------------------------------------------------------------------------
@@ -221,7 +219,7 @@ impl BlockBuilder {
         self.buf.len()
             + (self.restarts.len() * 4)  // restart offsets
             + 4                           // num_restarts
-            + 4                           // CRC32
+            + 4 // CRC32
     }
 }
 
@@ -296,8 +294,7 @@ impl<'a> BlockReader<'a> {
 
         // Verify CRC (last 4 bytes)
         let crc_offset = data.len() - 4;
-        let stored_crc =
-            u32::from_le_bytes(data[crc_offset..crc_offset + 4].try_into().unwrap());
+        let stored_crc = u32::from_le_bytes(data[crc_offset..crc_offset + 4].try_into().unwrap());
         let computed_crc = crc32fast::hash(&data[..crc_offset]);
         if stored_crc != computed_crc {
             return Err(BlockError::ChecksumMismatch);

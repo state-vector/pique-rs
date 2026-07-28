@@ -81,13 +81,16 @@ impl PartitionManifest {
     pub fn find_partition(&self, key: &[u8]) -> Option<usize> {
         // Binary search: find the first partition whose max_key >= key
         let key_str = std::str::from_utf8(key).unwrap_or("");
-        match self.partitions.binary_search_by(|p| p.max_key.as_str().cmp(key_str)) {
-            Ok(idx) => Some(idx),    // Exact match on max_key
+        match self
+            .partitions
+            .binary_search_by(|p| p.max_key.as_str().cmp(key_str))
+        {
+            Ok(idx) => Some(idx), // Exact match on max_key
             Err(idx) => {
                 if idx < self.partitions.len() {
-                    Some(idx)         // First partition with max_key > key
+                    Some(idx) // First partition with max_key > key
                 } else {
-                    None              // Beyond all partitions
+                    None // Beyond all partitions
                 }
             }
         }
@@ -100,7 +103,9 @@ impl PartitionManifest {
 
     /// Average keys per partition.
     pub fn avg_keys_per_partition(&self) -> u64 {
-        if self.partition_count == 0 { return 0; }
+        if self.partition_count == 0 {
+            return 0;
+        }
         self.total_keys / self.partition_count as u64
     }
 }
@@ -124,10 +129,7 @@ pub const DEFAULT_KEYS_PER_PARTITION: usize = 1_000_000;
 ///
 /// Returns the list of partition boundaries (max_key for each partition).
 /// The last partition captures all remaining keys.
-pub fn compute_partition_boundaries(
-    total_keys: usize,
-    keys_per_partition: usize,
-) -> usize {
+pub fn compute_partition_boundaries(total_keys: usize, keys_per_partition: usize) -> usize {
     let count = (total_keys + keys_per_partition - 1) / keys_per_partition;
     count.max(1)
 }
@@ -167,7 +169,8 @@ pub fn build_partition(
     }
 
     let output = writer.finish()?;
-    let max_key = keys_and_values.last()
+    let max_key = keys_and_values
+        .last()
         .map(|(k, _)| String::from_utf8_lossy(k).to_string())
         .unwrap_or_default();
     let key_count = keys_and_values.len() as u32;
@@ -194,9 +197,24 @@ mod tests {
             total_keys: 3000,
             partition_count: 3,
             partitions: vec![
-                PartitionEntry { max_key: "ddd".into(), segment_path: "seg_0.osi".into(), key_count: 1000, size_bytes: 50_000 },
-                PartitionEntry { max_key: "mmm".into(), segment_path: "seg_1.osi".into(), key_count: 1000, size_bytes: 50_000 },
-                PartitionEntry { max_key: "zzz".into(), segment_path: "seg_2.osi".into(), key_count: 1000, size_bytes: 50_000 },
+                PartitionEntry {
+                    max_key: "ddd".into(),
+                    segment_path: "seg_0.osi".into(),
+                    key_count: 1000,
+                    size_bytes: 50_000,
+                },
+                PartitionEntry {
+                    max_key: "mmm".into(),
+                    segment_path: "seg_1.osi".into(),
+                    key_count: 1000,
+                    size_bytes: 50_000,
+                },
+                PartitionEntry {
+                    max_key: "zzz".into(),
+                    segment_path: "seg_2.osi".into(),
+                    key_count: 1000,
+                    size_bytes: 50_000,
+                },
             ],
         };
 
@@ -248,17 +266,23 @@ mod tests {
             version: 1,
             total_keys: 1_000_000_000,
             partition_count: 1000,
-            partitions: (0..1000).map(|i| PartitionEntry {
-                max_key: format!("key_{:010}", (i + 1) * 1_000_000),
-                segment_path: format!("segments/seg_{:04}.osi", i),
-                key_count: 1_000_000,
-                size_bytes: 55_000_000,
-            }).collect(),
+            partitions: (0..1000)
+                .map(|i| PartitionEntry {
+                    max_key: format!("key_{:010}", (i + 1) * 1_000_000),
+                    segment_path: format!("segments/seg_{:04}.osi", i),
+                    key_count: 1_000_000,
+                    size_bytes: 55_000_000,
+                })
+                .collect(),
         };
 
         let json = serde_json::to_string(&manifest).unwrap();
         // Manifest for 1B keys across 1000 segments should be < 200KB
-        assert!(json.len() < 200_000, "Manifest too large: {} bytes", json.len());
+        assert!(
+            json.len() < 200_000,
+            "Manifest too large: {} bytes",
+            json.len()
+        );
 
         let decoded: PartitionManifest = serde_json::from_str(&json).unwrap();
         assert_eq!(decoded.total_keys, 1_000_000_000);

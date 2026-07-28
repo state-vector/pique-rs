@@ -16,7 +16,9 @@
 
 use crate::block::TrackedBlockBuilder;
 use crate::bloom;
-use crate::format::{Footer, SegmentMeta, DEFAULT_BLOCK_SIZE, DEFAULT_RESTART_INTERVAL, FORMAT_VERSION};
+use crate::format::{
+    DEFAULT_BLOCK_SIZE, DEFAULT_RESTART_INTERVAL, FORMAT_VERSION, Footer, SegmentMeta,
+};
 
 /// Options for the segment writer.
 #[derive(Debug, Clone)]
@@ -177,7 +179,8 @@ impl SegmentWriter {
         let footer_bytes = footer.to_bytes();
 
         // Concatenate: data_blocks + bloom + fst + footer
-        let total_size = self.data_blocks.len() + bloom_bytes.len() + fst_bytes.len() + footer_bytes.len();
+        let total_size =
+            self.data_blocks.len() + bloom_bytes.len() + fst_bytes.len() + footer_bytes.len();
         let mut output = Vec::with_capacity(total_size);
         output.extend_from_slice(&self.data_blocks);
         output.extend_from_slice(&bloom_bytes);
@@ -185,7 +188,7 @@ impl SegmentWriter {
         output.extend_from_slice(&footer_bytes);
 
         let meta = SegmentMeta {
-            generation: 0, // Caller sets this
+            generation: 0,       // Caller sets this
             path: String::new(), // Caller sets this
             size_bytes: output.len() as u64,
             key_count: self.key_count,
@@ -229,7 +232,9 @@ impl SegmentWriter {
                 .map_err(|e| WriterError::FstBuildError(e.to_string()))?;
         }
 
-        builder.into_inner().map_err(|e| WriterError::FstBuildError(e.to_string()))
+        builder
+            .into_inner()
+            .map_err(|e| WriterError::FstBuildError(e.to_string()))
     }
 }
 
@@ -251,7 +256,7 @@ pub enum WriterError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::format::{Footer, FOOTER_SIZE};
+    use crate::format::{FOOTER_SIZE, Footer};
 
     #[test]
     fn build_simple_segment() {
@@ -278,8 +283,7 @@ mod tests {
 
         // Verify footer can be read back
         let footer_start = output.data.len() - FOOTER_SIZE;
-        let footer_bytes: &[u8; FOOTER_SIZE] =
-            output.data[footer_start..].try_into().unwrap();
+        let footer_bytes: &[u8; FOOTER_SIZE] = output.data[footer_start..].try_into().unwrap();
         let footer = Footer::from_bytes(footer_bytes).unwrap();
 
         assert_eq!(footer.key_count, 100);
@@ -349,8 +353,7 @@ mod tests {
         let output = writer.finish().unwrap();
 
         let footer_start = output.data.len() - FOOTER_SIZE;
-        let footer_bytes: &[u8; FOOTER_SIZE] =
-            output.data[footer_start..].try_into().unwrap();
+        let footer_bytes: &[u8; FOOTER_SIZE] = output.data[footer_start..].try_into().unwrap();
         let footer = Footer::from_bytes(footer_bytes).unwrap();
 
         // Bloom section should be empty

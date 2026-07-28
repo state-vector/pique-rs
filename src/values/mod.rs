@@ -10,6 +10,6 @@
 //! All encodings use a compact binary format (varint lengths, no JSON overhead)
 //! for minimal block space usage.
 
-pub mod entity_location;
 pub mod adjacency;
+pub mod entity_location;
 pub mod path_entries;

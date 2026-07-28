@@ -16,9 +16,9 @@
 //! key → bloom check → FST lookup → block offset → read block → binary search
 //! ```
 
-use crate::block::{BlockReader, BlockError};
+use crate::block::{BlockError, BlockReader};
 use crate::bloom;
-use crate::format::{Footer, FormatError, FOOTER_SIZE};
+use crate::format::{FOOTER_SIZE, Footer, FormatError};
 use crate::storage::{StorageBackend, StorageError};
 use fst::{IntoStreamer, Streamer};
 
@@ -296,7 +296,11 @@ impl RemoteSegmentReader {
         // Parse metadata from tail
         let meta = SegmentReader::open_from_tail(&tail, segment_size)?;
 
-        Ok(Self { backend, path, meta })
+        Ok(Self {
+            backend,
+            path,
+            meta,
+        })
     }
 
     /// Point lookup. Returns the value for the given key, or None.
@@ -508,7 +512,10 @@ mod tests {
 
         let reader = SegmentReader::open(output.data).unwrap();
         assert_eq!(reader.key_count(), 1);
-        assert_eq!(reader.get(b"only_key").unwrap(), Some(b"only_value".to_vec()));
+        assert_eq!(
+            reader.get(b"only_key").unwrap(),
+            Some(b"only_value".to_vec())
+        );
         assert_eq!(reader.get(b"other").unwrap(), None);
     }
 
@@ -530,7 +537,11 @@ mod tests {
             .collect();
 
         for (i, key) in keys.iter().enumerate() {
-            let val = format!("{{\"file\": \"part-{}.parquet\", \"row_group\": {}}}", i / 100, i % 100);
+            let val = format!(
+                "{{\"file\": \"part-{}.parquet\", \"row_group\": {}}}",
+                i / 100,
+                i % 100
+            );
             writer.add(key.as_bytes(), val.as_bytes()).unwrap();
         }
 

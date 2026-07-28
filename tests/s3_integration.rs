@@ -33,11 +33,9 @@
 
 #[cfg(feature = "s3")]
 mod s3_tests {
-    use osi::{
-        S3Backend, SegmentReader, SegmentWriter, SegmentWriterOptions, StorageBackend,
-    };
-    use osi::format::{Footer, FOOTER_SIZE};
+    use osi::format::{FOOTER_SIZE, Footer};
     use osi::values::entity_location::EntityLocation;
+    use osi::{S3Backend, SegmentReader, SegmentWriter, SegmentWriterOptions, StorageBackend};
     use std::time::Instant;
 
     fn get_test_config() -> Option<(String, Option<String>)> {
@@ -81,7 +79,9 @@ mod s3_tests {
             .map(|i| {
                 format!(
                     "acme/myproject::packages/mod_{:03}/src/file_{:03}.rs::function::fn_{:05}",
-                    i / 100, i / 10, i
+                    i / 100,
+                    i / 10,
+                    i
                 )
             })
             .collect();
@@ -113,7 +113,10 @@ mod s3_tests {
 
         // Request 1: Footer
         let footer_start = Instant::now();
-        let footer_bytes = backend.read_tail(&segment_path, FOOTER_SIZE as u64).await.unwrap();
+        let footer_bytes = backend
+            .read_tail(&segment_path, FOOTER_SIZE as u64)
+            .await
+            .unwrap();
         let footer_ms = footer_start.elapsed().as_millis();
         let footer = Footer::from_bytes(footer_bytes.as_slice().try_into().unwrap()).unwrap();
         assert_eq!(footer.key_count, count as u32);
@@ -129,11 +132,7 @@ mod s3_tests {
             .await
             .unwrap();
         let dir_ms = dir_start.elapsed().as_millis();
-        eprintln!(
-            "Directory read: {} bytes in {}ms",
-            dir_bytes.len(),
-            dir_ms
-        );
+        eprintln!("Directory read: {} bytes in {}ms", dir_bytes.len(), dir_ms);
 
         // Request 3: A single data block (simulating a point lookup)
         let block_start = Instant::now();
@@ -171,11 +170,19 @@ mod s3_tests {
 
         // --- Summary ---
         eprintln!("\n=== S3 Integration Results ===");
-        eprintln!("Segment: {} keys, {} bytes ({:.1} KB)", count, segment_size, segment_size as f64 / 1024.0);
+        eprintln!(
+            "Segment: {} keys, {} bytes ({:.1} KB)",
+            count,
+            segment_size,
+            segment_size as f64 / 1024.0
+        );
         eprintln!("Footer read:    {}ms (64 bytes)", footer_ms);
         eprintln!("Directory read: {}ms ({} bytes)", dir_ms, dir_bytes.len());
         eprintln!("Block read:     {}ms (16 KB)", block_ms);
-        eprintln!("Total cold lookup: ~{}ms (footer + dir + block)", footer_ms + dir_ms + block_ms);
+        eprintln!(
+            "Total cold lookup: ~{}ms (footer + dir + block)",
+            footer_ms + dir_ms + block_ms
+        );
         eprintln!("Warm lookup:       ~{}ms (block only)", block_ms);
         eprintln!("==============================");
     }
@@ -202,18 +209,34 @@ mod s3_tests {
 
         let count = 100_000;
         let mut keys: Vec<String> = (0..count)
-            .map(|i| format!("repo::src/mod_{:04}/file_{:04}.rs::fn_{:06}", i / 1000, i / 100, i))
+            .map(|i| {
+                format!(
+                    "repo::src/mod_{:04}/file_{:04}.rs::fn_{:06}",
+                    i / 1000,
+                    i / 100,
+                    i
+                )
+            })
             .collect();
         keys.sort();
 
         for (i, key) in keys.iter().enumerate() {
-            let val = format!("{{\"f\":\"p-{:03}.pq\",\"rg\":{},\"ro\":{}}}", i / 1000, i / 100, i % 100);
+            let val = format!(
+                "{{\"f\":\"p-{:03}.pq\",\"rg\":{},\"ro\":{}}}",
+                i / 1000,
+                i / 100,
+                i % 100
+            );
             writer.add(key.as_bytes(), val.as_bytes()).unwrap();
         }
 
         let output = writer.finish().unwrap();
         let segment_size = output.data.len();
-        eprintln!("Segment: {} keys, {:.1} MB", count, segment_size as f64 / (1024.0 * 1024.0));
+        eprintln!(
+            "Segment: {} keys, {:.1} MB",
+            count,
+            segment_size as f64 / (1024.0 * 1024.0)
+        );
 
         backend.put(&segment_path, output.data).await.unwrap();
 
@@ -233,7 +256,10 @@ mod s3_tests {
 
         for &offset in &block_offsets {
             let start = Instant::now();
-            let _ = backend.read_range(&segment_path, offset..offset + 65536).await.unwrap();
+            let _ = backend
+                .read_range(&segment_path, offset..offset + 65536)
+                .await
+                .unwrap();
             block_times.push(start.elapsed().as_millis());
         }
 
@@ -245,11 +271,13 @@ mod s3_tests {
         block_times.sort();
 
         eprintln!("\n=== S3 Range Read Latencies ===");
-        eprintln!("Footer (64B): p50={}ms p99={}ms",
+        eprintln!(
+            "Footer (64B): p50={}ms p99={}ms",
             footer_times[footer_times.len() / 2],
             footer_times[footer_times.len() - 1],
         );
-        eprintln!("Block (64KB): p50={}ms p99={}ms",
+        eprintln!(
+            "Block (64KB): p50={}ms p99={}ms",
             block_times[block_times.len() / 2],
             block_times[block_times.len() - 1],
         );

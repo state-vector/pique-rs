@@ -65,8 +65,8 @@ impl StorageBackend for LocalBackend {
         use std::io::{Read, Seek, SeekFrom};
 
         let file_path = self.resolve(path);
-        let mut file = std::fs::File::open(&file_path)
-            .map_err(|e| StorageError::Io(e.to_string()))?;
+        let mut file =
+            std::fs::File::open(&file_path).map_err(|e| StorageError::Io(e.to_string()))?;
 
         file.seek(SeekFrom::Start(range.start))
             .map_err(|e| StorageError::Io(e.to_string()))?;
@@ -83,8 +83,8 @@ impl StorageBackend for LocalBackend {
         use std::io::{Read, Seek, SeekFrom};
 
         let file_path = self.resolve(path);
-        let mut file = std::fs::File::open(&file_path)
-            .map_err(|e| StorageError::Io(e.to_string()))?;
+        let mut file =
+            std::fs::File::open(&file_path).map_err(|e| StorageError::Io(e.to_string()))?;
 
         let file_size = file
             .seek(SeekFrom::End(0))
@@ -109,8 +109,8 @@ impl StorageBackend for LocalBackend {
 
     async fn object_size(&self, path: &str) -> Result<u64, StorageError> {
         let file_path = self.resolve(path);
-        let metadata = std::fs::metadata(&file_path)
-            .map_err(|e| StorageError::Io(e.to_string()))?;
+        let metadata =
+            std::fs::metadata(&file_path).map_err(|e| StorageError::Io(e.to_string()))?;
         Ok(metadata.len())
     }
 
@@ -122,8 +122,7 @@ impl StorageBackend for LocalBackend {
     async fn put(&self, path: &str, data: Vec<u8>) -> Result<(), StorageError> {
         let file_path = self.resolve(path);
         if let Some(parent) = file_path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| StorageError::Io(e.to_string()))?;
+            std::fs::create_dir_all(parent).map_err(|e| StorageError::Io(e.to_string()))?;
         }
         std::fs::write(&file_path, data).map_err(|e| StorageError::Io(e.to_string()))
     }
