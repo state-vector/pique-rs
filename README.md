@@ -66,7 +66,8 @@ For datasets with billions of keys, Pique partitions the index into segments of 
 
 ## Quick start
 
-```rust
+```rust,no_run
+# fn main() -> Result<(), Box<dyn std::error::Error>> {
 use pique::{SegmentWriter, SegmentWriterOptions, SegmentReader};
 
 // Build an index from sorted key-value pairs
@@ -85,11 +86,13 @@ assert_eq!(location, Some(b"file_b.parquet#rg3".to_vec()));
 
 // Non-existent keys are rejected by the bloom filter (no I/O)
 assert_eq!(reader.get(b"user_999")?, None);
+# Ok(())
+# }
 ```
 
 For S3-backed reads with the two-request pattern:
 
-```rust
+```rust,ignore
 use pique::{RemoteSegmentReader, S3Backend};
 
 let reader = RemoteSegmentReader::open(

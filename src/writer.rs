@@ -1,15 +1,16 @@
 //! Segment writer — builds a complete segment from sorted key→value pairs.
 //!
 //! Usage:
-//! ```ignore
+//! ```no_run
+//! use pique::{SegmentWriter, SegmentWriterOptions};
+//!
 //! let mut writer = SegmentWriter::new(SegmentWriterOptions::default());
 //!
 //! // Keys MUST be added in sorted order
-//! writer.add(b"key_001", b"value_001")?;
-//! writer.add(b"key_002", b"value_002")?;
-//! // ...
+//! writer.add(b"key_001", b"value_001").unwrap();
+//! writer.add(b"key_002", b"value_002").unwrap();
 //!
-//! let output = writer.finish()?;
+//! let output = writer.finish().unwrap();
 //! // output.data contains the complete segment bytes
 //! // output.meta contains segment metadata for the manifest
 //! ```

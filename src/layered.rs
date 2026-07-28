@@ -1,6 +1,6 @@
 //! Layered segment reader — multi-segment lookup with delta priority.
 //!
-//! An OSI index consists of a **base segment** (complete snapshot) plus zero
+//! An index consists of a **base segment** (complete snapshot) plus zero
 //! or more **delta segments** (incremental updates). Together they form a
 //! logical index without requiring full rebuilds on every write.
 //!

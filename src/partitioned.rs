@@ -9,10 +9,10 @@
 //!
 //! ```text
 //! PartitionManifest (tiny — <1KB for 1000 partitions):
-//!   partition[0]: keys [aaa... → bbb...]  → seg_000.osi
-//!   partition[1]: keys [bbb... → ccc...]  → seg_001.osi
+//!   partition[0]: keys [aaa... → bbb...]  → seg_000.pique
+//!   partition[1]: keys [bbb... → ccc...]  → seg_001.pique
 //!   ...
-//!   partition[N]: keys [zzz... → end]     → seg_N.osi
+//!   partition[N]: keys [zzz... → end]     → seg_N.pique
 //!
 //! Lookup:
 //!   key → binary search manifest → partition_idx → open segment → point lookup
@@ -22,7 +22,7 @@
 //!
 //! Each segment builds independently (parallelisable across Lambdas):
 //! 1. Coordinator partitions sorted keys into ranges
-//! 2. Each builder Lambda receives one partition's keys → builds one .osi segment
+//! 2. Each builder Lambda receives one partition's keys → builds one .pique segment
 //! 3. Coordinator writes the manifest listing all segments + key ranges
 //!
 //! Memory per builder: O(keys_per_partition) — typically ~1M keys = ~100MB.

@@ -1,38 +1,4 @@
-//! # pique
-//!
-//! Immutable, S3-native secondary index segments for Parquet acceleration.
-//!
-//! This library provides a compact, immutable key→value index format designed
-//! to be stored as single S3 objects and queried with minimal range reads (1–2
-//! per point lookup). It is NOT a database — it's a derived, read-only index
-//! that accelerates lookups into authoritative Parquet storage.
-//!
-//! ## Architecture
-//!
-//! ```text
-//! ┌─────────────────────────────────────────┐
-//! │  Segment File (single S3 object)        │
-//! ├─────────────────────────────────────────┤
-//! │  Data blocks (prefix-compressed KV)     │
-//! │  Block 0, Block 1, ..., Block N         │
-//! ├─────────────────────────────────────────┤
-//! │  Bloom filter (XOR8 filter)             │
-//! ├─────────────────────────────────────────┤
-//! │  FST directory (key → block offset)     │
-//! ├─────────────────────────────────────────┤
-//! │  Footer (fixed 64 bytes)                │
-//! └─────────────────────────────────────────┘
-//! ```
-//!
-//! ## Lookup flow
-//!
-//! 1. Read footer (last 64 bytes) → learn section offsets
-//! 2. Read FST + bloom (cached after first access)
-//! 3. Check bloom → early exit on definite miss
-//! 4. FST lookup → block offset
-//! 5. Range-read single data block → binary search → return value
-//!
-//! Cold lookup: 2 S3 range requests. Warm (directory cached): 1 request.
+#![doc = include_str!("../README.md")]
 
 pub mod block;
 pub mod bloom;
