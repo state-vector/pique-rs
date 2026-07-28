@@ -33,9 +33,9 @@
 
 #[cfg(feature = "s3")]
 mod s3_tests {
-    use osi::format::{FOOTER_SIZE, Footer};
-    use osi::values::entity_location::EntityLocation;
-    use osi::{S3Backend, SegmentReader, SegmentWriter, SegmentWriterOptions, StorageBackend};
+    use pique::format::{FOOTER_SIZE, Footer};
+    use pique::values::entity_location::EntityLocation;
+    use pique::{S3Backend, SegmentReader, SegmentWriter, SegmentWriterOptions, StorageBackend};
     use std::time::Instant;
 
     fn get_test_config() -> Option<(String, Option<String>)> {

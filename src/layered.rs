@@ -135,11 +135,11 @@ impl RemoteLayeredReader {
     /// Each segment is opened with a single tail read. All metadata (FST + bloom)
     /// is cached in memory for the lifetime of this reader.
     pub async fn open(
-        backend: &dyn StorageBackend,
+        _backend: &dyn StorageBackend,
         paths: Vec<String>,
-        tail_budget: Option<u64>,
+        _tail_budget: Option<u64>,
     ) -> Result<Self, ReaderError> {
-        let mut segments = Vec::with_capacity(paths.len());
+        let segments = Vec::with_capacity(paths.len());
         for path in paths {
             // Each segment gets its own backend box (needed for the reader's lifetime)
             // In production, you'd share a connection pool. For now, clone the backend config.

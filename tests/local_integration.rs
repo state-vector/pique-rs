@@ -4,10 +4,10 @@
 //! This validates the full write → store → range-read → lookup flow without
 //! needing S3 or MinIO.
 
-use osi::format::{FOOTER_SIZE, Footer};
-use osi::values::adjacency::{AdjacencyList, Edge, RelKind};
-use osi::values::entity_location::EntityLocation;
-use osi::{LocalBackend, SegmentReader, SegmentWriter, SegmentWriterOptions, StorageBackend};
+use pique::format::{FOOTER_SIZE, Footer};
+use pique::values::adjacency::{AdjacencyList, Edge, RelKind};
+use pique::values::entity_location::EntityLocation;
+use pique::{LocalBackend, SegmentReader, SegmentWriter, SegmentWriterOptions, StorageBackend};
 use tempfile::TempDir;
 
 /// End-to-end: build segment → write via backend → read via range reads → lookup.

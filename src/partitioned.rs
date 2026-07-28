@@ -130,7 +130,7 @@ pub const DEFAULT_KEYS_PER_PARTITION: usize = 1_000_000;
 /// Returns the list of partition boundaries (max_key for each partition).
 /// The last partition captures all remaining keys.
 pub fn compute_partition_boundaries(total_keys: usize, keys_per_partition: usize) -> usize {
-    let count = (total_keys + keys_per_partition - 1) / keys_per_partition;
+    let count = total_keys.div_ceil(keys_per_partition);
     count.max(1)
 }
 

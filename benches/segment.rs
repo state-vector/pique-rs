@@ -9,7 +9,7 @@
 //! Run with: cargo bench
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use osi::{SegmentReader, SegmentWriter, SegmentWriterOptions};
+use pique::{SegmentReader, SegmentWriter, SegmentWriterOptions};
 
 /// Generate synthetic entity IDs that match our real workload pattern.
 fn generate_entity_keys(count: usize) -> Vec<String> {
@@ -262,7 +262,7 @@ criterion_main!(benches, layered_benches);
 // Layered segment benchmarks
 // ===========================================================================
 
-use osi::{LayeredReader, merge_segments, tombstone_value};
+use pique::{LayeredReader, merge_segments, tombstone_value};
 
 /// Build a base segment (100K keys) + N delta segments (50 keys each).
 /// Returns (base_reader, delta_readers, base_keys, delta_keys).

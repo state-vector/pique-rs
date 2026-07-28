@@ -8,6 +8,7 @@
 //! 2. **`RemoteSegmentReader`** — backend-aware, uses the 2-request pattern:
 //!    - Request 1 (cold start): tail read (last 256KB) → footer + bloom + FST
 //!    - Request 2 (per lookup): single block range read
+//!
 //!    Caches the metadata across lookups so steady-state is 1 request per lookup.
 //!
 //! ## Lookup flow
@@ -175,6 +176,7 @@ impl SegmentReader {
     }
 
     /// Iterate all entries in sorted order.
+    #[allow(clippy::type_complexity)]
     pub fn iter(&self) -> Result<Vec<(Vec<u8>, Vec<u8>)>, ReaderError> {
         let mut results = Vec::new();
         let mut offsets: Vec<u64> = Vec::new();

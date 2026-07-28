@@ -29,8 +29,8 @@
 //! Produces a table of latency measurements (p50, p95, p99, mean) for each
 //! access pattern, plus segment metadata (size, key count, block count).
 
-use osi::format::{FOOTER_SIZE, Footer};
-use osi::{S3Backend, SegmentWriter, SegmentWriterOptions, StorageBackend};
+use pique::format::{FOOTER_SIZE, Footer};
+use pique::{S3Backend, SegmentWriter, SegmentWriterOptions, StorageBackend};
 use std::time::{Duration, Instant};
 
 #[tokio::main]
