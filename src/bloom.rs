@@ -34,6 +34,9 @@ pub fn build_filter(keys: &[&[u8]]) -> Vec<u8> {
 /// Returns:
 /// - `true` — key might be present (check the data blocks)
 /// - `false` — key is definitely NOT present (skip the segment)
+///
+/// If the filter data is corrupt or cannot be deserialized, returns `true`
+/// (conservative — always check the data blocks rather than panic).
 pub fn might_contain(filter_bytes: &[u8], key: &[u8]) -> bool {
     if filter_bytes.is_empty() {
         return true; // No filter → always check
@@ -41,11 +44,17 @@ pub fn might_contain(filter_bytes: &[u8], key: &[u8]) -> bool {
 
     let filter = match deserialize_xor8(filter_bytes) {
         Some(f) => f,
-        None => return true, // Corrupted filter → be conservative
+        None => return true, // Corrupted/unreadable filter → be conservative
     };
 
     let hash = xxhash_rust::xxh3::xxh3_64(key);
-    filter.contains(&hash)
+
+    // Catch panics from the xorf crate on corrupt fingerprint data.
+    // The xorf `contains` implementation uses unchecked index arithmetic
+    // that can panic on corrupt data (e.g., block_length doesn't match
+    // actual fingerprints array size after deserialization with bad data).
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| filter.contains(&hash)))
+        .unwrap_or(true) // Panic = corrupt → conservative "might contain"
 }
 
 // ---------------------------------------------------------------------------
@@ -80,12 +89,19 @@ fn deserialize_xor8(data: &[u8]) -> Option<Xor8> {
     let seed = u64::from_le_bytes(data[0..8].try_into().ok()?);
     let block_length = u64::from_le_bytes(data[8..16].try_into().ok()?) as usize;
 
-    let expected_len = 16 + block_length * 3;
+    // Guard against corrupt block_length causing overflow or out-of-bounds
+    let fingerprint_len = block_length.checked_mul(3)?;
+    let expected_len = 16usize.checked_add(fingerprint_len)?;
     if data.len() < expected_len {
         return None;
     }
 
-    let fingerprints = data[16..16 + block_length * 3].to_vec();
+    // Additional sanity check: block_length of 0 with a non-empty filter makes no sense
+    if block_length == 0 {
+        return None;
+    }
+
+    let fingerprints = data[16..16 + fingerprint_len].to_vec();
 
     Some(Xor8 {
         seed,

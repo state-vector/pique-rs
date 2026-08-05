@@ -33,6 +33,7 @@ pub const DEFAULT_TAIL_READ_BUDGET: u64 = 256 * 1024;
 // ===========================================================================
 
 /// A fully in-memory segment reader. Loads everything at construction time.
+#[derive(Debug)]
 pub struct SegmentReader {
     /// Complete segment data.
     data: Vec<u8>,
@@ -59,6 +60,10 @@ impl SegmentReader {
             .try_into()
             .unwrap();
         let footer = Footer::from_bytes(footer_bytes).map_err(ReaderError::Format)?;
+
+        // Validate footer offsets are within segment bounds (before the footer itself)
+        let content_end = footer_start; // Everything before the footer
+        validate_footer_offsets(&footer, content_end)?;
 
         // Load bloom filter
         let bloom_start = footer.bloom_offset as usize;
@@ -102,6 +107,10 @@ impl SegmentReader {
             .unwrap();
         let footer = Footer::from_bytes(footer_bytes).map_err(ReaderError::Format)?;
 
+        // Validate footer offsets are within the full segment bounds
+        let content_end = segment_size as usize - FOOTER_SIZE;
+        validate_footer_offsets(&footer, content_end)?;
+
         // Calculate where in the tail buffer the bloom and FST live.
         // The tail buffer contains the last `tail.len()` bytes of the segment.
         // Offsets in the footer are from segment start.
@@ -118,6 +127,14 @@ impl SegmentReader {
         // Bloom filter
         let bloom_local_start = (footer.bloom_offset - tail_start_offset) as usize;
         let bloom_local_end = bloom_local_start + footer.bloom_length as usize;
+        if footer.bloom_length > 0 && bloom_local_end > footer_start {
+            return Err(ReaderError::InvalidOffset {
+                section: "bloom",
+                offset: footer.bloom_offset,
+                length: footer.bloom_length,
+                segment_size,
+            });
+        }
         let bloom_bytes = if footer.bloom_length > 0 {
             tail[bloom_local_start..bloom_local_end].to_vec()
         } else {
@@ -127,6 +144,14 @@ impl SegmentReader {
         // FST
         let fst_local_start = (footer.fst_offset - tail_start_offset) as usize;
         let fst_local_end = fst_local_start + footer.fst_length as usize;
+        if fst_local_end > footer_start {
+            return Err(ReaderError::InvalidOffset {
+                section: "fst",
+                offset: footer.fst_offset,
+                length: footer.fst_length,
+                segment_size,
+            });
+        }
         let fst_data = tail[fst_local_start..fst_local_end].to_vec();
         let fst = fst::Map::new(fst_data).map_err(|e| ReaderError::FstError(e.to_string()))?;
 
@@ -216,6 +241,16 @@ pub struct SegmentMetadata {
     pub footer: Footer,
     pub fst: fst::Map<Vec<u8>>,
     pub bloom_bytes: Vec<u8>,
+}
+
+impl std::fmt::Debug for SegmentMetadata {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SegmentMetadata")
+            .field("footer", &self.footer)
+            .field("fst_size", &self.fst.as_fst().as_bytes().len())
+            .field("bloom_size", &self.bloom_bytes.len())
+            .finish()
+    }
 }
 
 impl SegmentMetadata {
@@ -365,6 +400,67 @@ impl RemoteSegmentReader {
 // Shared helpers
 // ===========================================================================
 
+/// Validate that footer offsets point within the segment content area.
+/// `content_end` is the byte offset where the footer starts (i.e. everything
+/// before the footer is content — data blocks, bloom, FST).
+fn validate_footer_offsets(footer: &Footer, content_end: usize) -> Result<(), ReaderError> {
+    let segment_size = content_end + FOOTER_SIZE;
+
+    // data_blocks_length must fit before content_end
+    if footer.data_blocks_length as usize > content_end {
+        return Err(ReaderError::InvalidOffset {
+            section: "data_blocks",
+            offset: footer.data_blocks_offset,
+            length: footer.data_blocks_length,
+            segment_size: segment_size as u64,
+        });
+    }
+
+    // bloom must fit within content
+    if footer.bloom_length > 0 {
+        let bloom_end = footer
+            .bloom_offset
+            .checked_add(footer.bloom_length)
+            .ok_or(ReaderError::InvalidOffset {
+                section: "bloom",
+                offset: footer.bloom_offset,
+                length: footer.bloom_length,
+                segment_size: segment_size as u64,
+            })?;
+        if bloom_end as usize > content_end {
+            return Err(ReaderError::InvalidOffset {
+                section: "bloom",
+                offset: footer.bloom_offset,
+                length: footer.bloom_length,
+                segment_size: segment_size as u64,
+            });
+        }
+    }
+
+    // FST must fit within content
+    if footer.fst_length > 0 {
+        let fst_end = footer
+            .fst_offset
+            .checked_add(footer.fst_length)
+            .ok_or(ReaderError::InvalidOffset {
+                section: "fst",
+                offset: footer.fst_offset,
+                length: footer.fst_length,
+                segment_size: segment_size as u64,
+            })?;
+        if fst_end as usize > content_end {
+            return Err(ReaderError::InvalidOffset {
+                section: "fst",
+                offset: footer.fst_offset,
+                length: footer.fst_length,
+                segment_size: segment_size as u64,
+            });
+        }
+    }
+
+    Ok(())
+}
+
 /// Find the block offset for a key using the FST.
 /// The FST maps last_key_in_block → block_offset. We find the first entry
 /// whose key >= target.
@@ -406,11 +502,51 @@ pub enum ReaderError {
     #[error("Invalid block offset: {0}")]
     InvalidBlockOffset(u64),
 
+    #[error("Footer {section} offset out of bounds: offset={offset}, length={length}, segment_size={segment_size}")]
+    InvalidOffset {
+        section: &'static str,
+        offset: u64,
+        length: u64,
+        segment_size: u64,
+    },
+
     #[error("Tail read too small: needed {needed} bytes but only read {got}")]
     TailTooSmall { needed: usize, got: usize },
 
     #[error("Storage error: {0}")]
     Storage(StorageError),
+}
+
+impl ReaderError {
+    /// Returns true if this error indicates data corruption (checksum mismatch,
+    /// format error, structural damage). The caller should fall back to a
+    /// source-of-truth data path.
+    ///
+    /// Returns false for I/O errors, network issues, or "not found" conditions
+    /// where retry is appropriate.
+    pub fn is_corruption(&self) -> bool {
+        matches!(
+            self,
+            ReaderError::Format(FormatError::ChecksumMismatch { .. })
+                | ReaderError::Format(FormatError::InvalidMagic)
+                | ReaderError::Format(FormatError::TooSmall { .. })
+                | ReaderError::Format(FormatError::UnsupportedVersion(_))
+                | ReaderError::Block(BlockError::ChecksumMismatch)
+                | ReaderError::Block(BlockError::BlockTooSmall)
+                | ReaderError::Block(BlockError::InvalidVarint)
+                | ReaderError::Block(BlockError::CorruptedEntry)
+                | ReaderError::Block(BlockError::UnexpectedEof)
+                | ReaderError::FstError(_)
+                | ReaderError::InvalidBlockOffset(_)
+                | ReaderError::InvalidOffset { .. }
+        )
+    }
+
+    /// Returns true if this is a transient I/O or storage error where retry
+    /// is appropriate.
+    pub fn is_transient(&self) -> bool {
+        matches!(self, ReaderError::Storage(_))
+    }
 }
 
 // ===========================================================================
