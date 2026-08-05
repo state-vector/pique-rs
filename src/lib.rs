@@ -6,6 +6,7 @@ pub mod format;
 pub mod layered;
 pub mod partitioned;
 pub mod reader;
+pub mod stats;
 pub mod storage;
 pub mod values;
 pub mod writer;
@@ -18,6 +19,9 @@ pub use layered::{
 };
 pub use reader::{ReaderError, RemoteSegmentReader, SegmentMetadata, SegmentReader};
 pub use storage::{LocalBackend, StorageBackend, StorageError};
+pub use stats::{
+    ColumnStats, RangePredicate, RowGroupRef, RowGroupStats, StatsManifest, StatsManifestBuilder,
+};
 pub use writer::{SegmentOutput, SegmentWriter, SegmentWriterOptions};
 
 #[cfg(feature = "s3")]

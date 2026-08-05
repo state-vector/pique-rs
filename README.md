@@ -60,7 +60,7 @@ For datasets with billions of keys, Pique partitions the index into segments of 
 
 **Layered segments** — a base segment plus delta segments for incremental updates. New data produces small deltas instead of rebuilding the full index. Background merges keep the layer count bounded.
 
-**Stats manifests** — per-file, per-row-group column statistics (min/max/null count) that enable predicate pushdown without opening Parquet footers.
+**Stats manifests** — per-file, per-row-group column statistics (min/max/null count) that enable range-predicate pruning without opening Parquet footers. Built from Parquet footer metadata (no data scan), queried via interval overlap: `WHERE ts BETWEEN a AND b` resolves to only the row groups whose min/max range overlaps the predicate. Multi-column predicates intersect their candidate sets (AND semantics).
 
 **Adjacency lists** — compressed edge lists for graph traversal patterns, stored as index values.
 
@@ -104,6 +104,53 @@ let reader = RemoteSegmentReader::open(
 // First lookup: 1 S3 range read (metadata already cached from open)
 let result = reader.get(b"user_002").await?;
 ```
+
+## Range-predicate pruning with stats manifests
+
+For range queries (`WHERE ts BETWEEN a AND b`), the bloom filter can't help — it only handles equality. The stats manifest fills this gap by storing per-(file, row_group) column min/max values and answering interval-overlap queries:
+
+```rust
+use pique::stats::{StatsManifest, StatsManifestBuilder, ColumnStats, RangePredicate};
+
+// Build manifest from Parquet footer metadata (no data scan needed)
+let manifest = StatsManifestBuilder::new()
+    .add_row_group("data/2024-01-15.parquet", 0, vec![
+        ("timestamp".into(), ColumnStats {
+            min: b"2024-01-15T00:00:00Z".to_vec(),
+            max: b"2024-01-15T07:59:59Z".to_vec(),
+            null_count: 0,
+        }),
+    ])
+    .add_row_group("data/2024-01-15.parquet", 1, vec![
+        ("timestamp".into(), ColumnStats {
+            min: b"2024-01-15T08:00:00Z".to_vec(),
+            max: b"2024-01-15T15:59:59Z".to_vec(),
+            null_count: 0,
+        }),
+    ])
+    .add_row_group("data/2024-01-15.parquet", 2, vec![
+        ("timestamp".into(), ColumnStats {
+            min: b"2024-01-15T16:00:00Z".to_vec(),
+            max: b"2024-01-15T23:59:59Z".to_vec(),
+            null_count: 0,
+        }),
+    ])
+    .build();
+
+// Query: which row groups overlap 10:00–14:00?
+let candidates = manifest.query_overlap(&[RangePredicate {
+    column: "timestamp".into(),
+    min: b"2024-01-15T10:00:00Z".to_vec(),
+    max: b"2024-01-15T14:00:00Z".to_vec(),
+}]);
+// Result: only row group 1 (08:00–15:59) — row groups 0 and 2 pruned
+
+// Serialize/deserialize for storage alongside .pique segments
+let bytes = manifest.to_json().unwrap();
+let loaded = StatsManifest::from_json(&bytes).unwrap();
+```
+
+Multiple predicates use AND semantics — a row group must overlap *all* predicates to be included. This pairs with the segment index: use bloom for equality, stats manifest for ranges, intersect the candidate file sets.
 
 ## Project status
 
