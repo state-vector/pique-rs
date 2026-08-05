@@ -6,6 +6,7 @@ pub mod format;
 pub mod layered;
 pub mod partitioned;
 pub mod reader;
+pub mod secondary;
 pub mod stats;
 pub mod storage;
 pub mod values;
