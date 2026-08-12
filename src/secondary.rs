@@ -45,18 +45,10 @@ use crate::values::location_set::LocationSet;
 use crate::writer::{SegmentOutput, SegmentWriter, SegmentWriterOptions, WriterError};
 
 /// Options for the secondary index writer.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct SecondaryIndexOptions {
     /// Segment writer options (block size, restart interval, bloom).
     pub segment_options: SegmentWriterOptions,
-}
-
-impl Default for SecondaryIndexOptions {
-    fn default() -> Self {
-        Self {
-            segment_options: SegmentWriterOptions::default(),
-        }
-    }
 }
 
 /// Accumulating writer for secondary indexes.
