@@ -102,11 +102,9 @@ impl LocationSet {
                 .to_string();
             offset += file_key_len;
 
-            let row_group =
-                u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap());
+            let row_group = u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap());
             offset += 4;
-            let row_offset =
-                u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap());
+            let row_offset = u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap());
             offset += 4;
 
             locations.push(EntityLocation {

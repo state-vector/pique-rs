@@ -418,15 +418,14 @@ fn validate_footer_offsets(footer: &Footer, content_end: usize) -> Result<(), Re
 
     // bloom must fit within content
     if footer.bloom_length > 0 {
-        let bloom_end = footer
-            .bloom_offset
-            .checked_add(footer.bloom_length)
-            .ok_or(ReaderError::InvalidOffset {
+        let bloom_end = footer.bloom_offset.checked_add(footer.bloom_length).ok_or(
+            ReaderError::InvalidOffset {
                 section: "bloom",
                 offset: footer.bloom_offset,
                 length: footer.bloom_length,
                 segment_size: segment_size as u64,
-            })?;
+            },
+        )?;
         if bloom_end as usize > content_end {
             return Err(ReaderError::InvalidOffset {
                 section: "bloom",
@@ -439,15 +438,16 @@ fn validate_footer_offsets(footer: &Footer, content_end: usize) -> Result<(), Re
 
     // FST must fit within content
     if footer.fst_length > 0 {
-        let fst_end = footer
-            .fst_offset
-            .checked_add(footer.fst_length)
-            .ok_or(ReaderError::InvalidOffset {
-                section: "fst",
-                offset: footer.fst_offset,
-                length: footer.fst_length,
-                segment_size: segment_size as u64,
-            })?;
+        let fst_end =
+            footer
+                .fst_offset
+                .checked_add(footer.fst_length)
+                .ok_or(ReaderError::InvalidOffset {
+                    section: "fst",
+                    offset: footer.fst_offset,
+                    length: footer.fst_length,
+                    segment_size: segment_size as u64,
+                })?;
         if fst_end as usize > content_end {
             return Err(ReaderError::InvalidOffset {
                 section: "fst",
@@ -502,7 +502,9 @@ pub enum ReaderError {
     #[error("Invalid block offset: {0}")]
     InvalidBlockOffset(u64),
 
-    #[error("Footer {section} offset out of bounds: offset={offset}, length={length}, segment_size={segment_size}")]
+    #[error(
+        "Footer {section} offset out of bounds: offset={offset}, length={length}, segment_size={segment_size}"
+    )]
     InvalidOffset {
         section: &'static str,
         offset: u64,

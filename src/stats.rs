@@ -219,7 +219,7 @@ impl StatsManifest {
 
     /// Query with a single predicate (convenience method).
     pub fn query_overlap_single(&self, predicate: &RangePredicate) -> Vec<RowGroupRef> {
-        self.query_overlap(&[predicate.clone()])
+        self.query_overlap(std::slice::from_ref(predicate))
     }
 
     /// Total number of row groups across all files.

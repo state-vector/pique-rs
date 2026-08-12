@@ -45,18 +45,10 @@ use crate::values::location_set::LocationSet;
 use crate::writer::{SegmentOutput, SegmentWriter, SegmentWriterOptions, WriterError};
 
 /// Options for the secondary index writer.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct SecondaryIndexOptions {
     /// Segment writer options (block size, restart interval, bloom).
     pub segment_options: SegmentWriterOptions,
-}
-
-impl Default for SecondaryIndexOptions {
-    fn default() -> Self {
-        Self {
-            segment_options: SegmentWriterOptions::default(),
-        }
-    }
 }
 
 /// Accumulating writer for secondary indexes.
@@ -91,10 +83,7 @@ impl SecondaryIndexWriter {
     ///
     /// Keys can be added in any order — sorting happens at `finish()`.
     pub fn add_location(&mut self, key: &[u8], location: EntityLocation) {
-        self.entries
-            .entry(key.to_vec())
-            .or_default()
-            .push(location);
+        self.entries.entry(key.to_vec()).or_default().push(location);
     }
 
     /// Number of distinct keys accumulated so far.
