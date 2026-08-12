@@ -91,10 +91,7 @@ impl SecondaryIndexWriter {
     ///
     /// Keys can be added in any order — sorting happens at `finish()`.
     pub fn add_location(&mut self, key: &[u8], location: EntityLocation) {
-        self.entries
-            .entry(key.to_vec())
-            .or_default()
-            .push(location);
+        self.entries.entry(key.to_vec()).or_default().push(location);
     }
 
     /// Number of distinct keys accumulated so far.
