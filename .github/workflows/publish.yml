@@ -45,6 +45,11 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         if: steps.version.outputs.changed == 'true' && steps.check_published.outputs.already_published != 'true'
+        with:
+          # Reuse the cache CI already warmed on main rather than keying on this
+          # job's id, which made every publish run compile from scratch.
+          shared-key: rust-ci
+          save-if: false
 
       - name: Run tests
         if: steps.version.outputs.changed == 'true' && steps.check_published.outputs.already_published != 'true'
