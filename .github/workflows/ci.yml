@@ -21,6 +21,18 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      # A version bump whose Cargo.lock was not refreshed passes fmt, clippy
+      # and tests, then fails at `cargo publish` with a message about a dirty
+      # working tree rather than the cause. That is what happened to 0.1.5.
+      # `--locked` refuses to update the lock, so a mismatch fails here, on the
+      # PR, with an actionable message.
+      - name: Cargo.lock matches Cargo.toml
+        run: |
+          if ! cargo metadata --format-version 1 --locked >/dev/null 2>&1; then
+            echo "::error file=Cargo.lock::Cargo.lock is out of date with Cargo.toml (a version bump must include the refreshed lock). Fix: cargo check && git add Cargo.lock"
+            exit 1
+          fi
+
       - name: Check formatting
         run: cargo fmt --check
 

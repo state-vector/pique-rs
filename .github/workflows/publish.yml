@@ -1,10 +1,19 @@
 name: Publish to crates.io
 
+# Publishing is gated on ONE question: is this version already on crates.io?
+#
+# It used to also require Cargo.toml to differ from HEAD~1, which made a failed
+# publish unrecoverable: the retry saw the same version on both sides, reported
+# "unchanged", and skipped every step — so 0.1.5 built, tagged and passed CI
+# while never reaching crates.io. The registry is the source of truth for
+# "published", so ask it directly and let any push (or a manual dispatch)
+# retry safely.
 on:
   push:
     branches: [main]
     paths:
       - "Cargo.toml"
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -15,53 +24,66 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          # Full history + tags: the tag step below checks whether the tag
+          # already exists, which a shallow clone cannot answer.
+          fetch-depth: 0
 
-      - name: Check if version changed
+      - name: Read version
         id: version
         run: |
           CURRENT=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
-          PREVIOUS=$(git show HEAD~1:Cargo.toml 2>/dev/null | grep '^version' | head -1 | sed 's/.*"\(.*\)"/\1/' || echo "")
           echo "current=$CURRENT" >> "$GITHUB_OUTPUT"
-          if [ "$CURRENT" != "$PREVIOUS" ]; then
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-          fi
+          echo "Cargo.toml version: $CURRENT"
 
       - name: Check if version already published
-        if: steps.version.outputs.changed == 'true'
         id: check_published
         run: |
           VERSION="${{ steps.version.outputs.current }}"
           if cargo search pique --limit 1 2>/dev/null | grep -q "pique = \"$VERSION\""; then
             echo "already_published=true" >> "$GITHUB_OUTPUT"
+            echo "$VERSION is already on crates.io — nothing to do."
           else
             echo "already_published=false" >> "$GITHUB_OUTPUT"
+            echo "$VERSION is not on crates.io — publishing."
           fi
 
       - uses: dtolnay/rust-toolchain@stable
-        if: steps.version.outputs.changed == 'true' && steps.check_published.outputs.already_published != 'true'
+        if: steps.check_published.outputs.already_published != 'true'
 
       - uses: Swatinem/rust-cache@v2
-        if: steps.version.outputs.changed == 'true' && steps.check_published.outputs.already_published != 'true'
+        if: steps.check_published.outputs.already_published != 'true'
 
       - name: Run tests
-        if: steps.version.outputs.changed == 'true' && steps.check_published.outputs.already_published != 'true'
+        if: steps.check_published.outputs.already_published != 'true'
         run: cargo test --all-features
 
+      # `--locked` rather than a bare publish: if Cargo.lock does not already
+      # match Cargo.toml, cargo used to silently regenerate it here and then
+      # refuse to package a "dirty" tree, reporting the lock file rather than
+      # the cause. This fails earlier and says what is wrong. The CI workflow
+      # blocks the mismatch at PR time.
       - name: Publish to crates.io
-        if: steps.version.outputs.changed == 'true' && steps.check_published.outputs.already_published != 'true'
-        run: cargo publish
+        if: steps.check_published.outputs.already_published != 'true'
+        run: cargo publish --locked
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
+      # Idempotent: a tag may already exist (cut by hand, or by an earlier run
+      # that published and then failed later). Re-running must not fail on it.
       - name: Create git tag and GitHub Release
-        if: steps.version.outputs.changed == 'true' && steps.check_published.outputs.already_published != 'true'
+        if: steps.check_published.outputs.already_published != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           VERSION="v${{ steps.version.outputs.current }}"
-          git tag "$VERSION"
-          git push origin "$VERSION"
-          gh release create "$VERSION" --generate-notes
+          if git ls-remote --exit-code --tags origin "refs/tags/$VERSION" >/dev/null 2>&1; then
+            echo "Tag $VERSION already exists — leaving it as is."
+          else
+            git tag "$VERSION"
+            git push origin "$VERSION"
+          fi
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            echo "Release $VERSION already exists — leaving it as is."
+          else
+            gh release create "$VERSION" --generate-notes
+          fi
