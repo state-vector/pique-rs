@@ -19,7 +19,7 @@
 
 use crate::block::{BlockError, BlockReader};
 use crate::bloom;
-use crate::format::{FOOTER_SIZE, Footer, FormatError};
+use crate::format::{FOOTER_SIZE, FORMAT_VERSION, Footer, FormatError};
 use crate::storage::{StorageBackend, StorageError};
 use fst::{IntoStreamer, Streamer};
 
@@ -254,6 +254,35 @@ impl std::fmt::Debug for SegmentMetadata {
 }
 
 impl SegmentMetadata {
+    /// Metadata for a segment containing zero keys — empty FST, no bloom.
+    ///
+    /// Constructed in memory (no I/O). Every lookup against it returns
+    /// `None`: the FST has no entries, so `block_offset_for_key` finds nothing.
+    pub fn empty() -> Self {
+        // An FST built with zero entries is valid and parseable — building
+        // and parsing it are both infallible for the empty case.
+        let fst_bytes = fst::MapBuilder::memory()
+            .into_inner()
+            .expect("empty FST build cannot fail");
+        let fst = fst::Map::new(fst_bytes).expect("empty FST must parse");
+
+        Self {
+            footer: Footer {
+                format_version: FORMAT_VERSION,
+                data_blocks_offset: 0,
+                data_blocks_length: 0,
+                bloom_offset: 0,
+                bloom_length: 0,
+                fst_offset: 0,
+                fst_length: fst.as_fst().as_bytes().len() as u64,
+                key_count: 0,
+                checksum: 0,
+            },
+            fst,
+            bloom_bytes: Vec::new(),
+        }
+    }
+
     /// Check bloom filter (no I/O).
     pub fn might_contain(&self, key: &[u8]) -> bool {
         bloom::might_contain(&self.bloom_bytes, key)
@@ -322,6 +351,20 @@ impl RemoteSegmentReader {
             .object_size(&path)
             .await
             .map_err(ReaderError::Storage)?;
+
+        // A zero-byte object is a degenerate segment — historically written
+        // as a synthesized "empty base" for layered indexes. Reading a tail
+        // from it is impossible (`read_size = min(budget, 0) = 0` is an
+        // invalid suffix range — S3 answers 416), so treat it as a segment
+        // with zero keys rather than an error. Every lookup against it
+        // returns `None`.
+        if segment_size == 0 {
+            return Ok(Self {
+                backend,
+                path,
+                meta: SegmentMetadata::empty(),
+            });
+        }
 
         // Read the tail (one request)
         let read_size = budget.min(segment_size);
@@ -418,15 +461,14 @@ fn validate_footer_offsets(footer: &Footer, content_end: usize) -> Result<(), Re
 
     // bloom must fit within content
     if footer.bloom_length > 0 {
-        let bloom_end = footer
-            .bloom_offset
-            .checked_add(footer.bloom_length)
-            .ok_or(ReaderError::InvalidOffset {
+        let bloom_end = footer.bloom_offset.checked_add(footer.bloom_length).ok_or(
+            ReaderError::InvalidOffset {
                 section: "bloom",
                 offset: footer.bloom_offset,
                 length: footer.bloom_length,
                 segment_size: segment_size as u64,
-            })?;
+            },
+        )?;
         if bloom_end as usize > content_end {
             return Err(ReaderError::InvalidOffset {
                 section: "bloom",
@@ -439,15 +481,16 @@ fn validate_footer_offsets(footer: &Footer, content_end: usize) -> Result<(), Re
 
     // FST must fit within content
     if footer.fst_length > 0 {
-        let fst_end = footer
-            .fst_offset
-            .checked_add(footer.fst_length)
-            .ok_or(ReaderError::InvalidOffset {
-                section: "fst",
-                offset: footer.fst_offset,
-                length: footer.fst_length,
-                segment_size: segment_size as u64,
-            })?;
+        let fst_end =
+            footer
+                .fst_offset
+                .checked_add(footer.fst_length)
+                .ok_or(ReaderError::InvalidOffset {
+                    section: "fst",
+                    offset: footer.fst_offset,
+                    length: footer.fst_length,
+                    segment_size: segment_size as u64,
+                })?;
         if fst_end as usize > content_end {
             return Err(ReaderError::InvalidOffset {
                 section: "fst",
@@ -502,7 +545,9 @@ pub enum ReaderError {
     #[error("Invalid block offset: {0}")]
     InvalidBlockOffset(u64),
 
-    #[error("Footer {section} offset out of bounds: offset={offset}, length={length}, segment_size={segment_size}")]
+    #[error(
+        "Footer {section} offset out of bounds: offset={offset}, length={length}, segment_size={segment_size}"
+    )]
     InvalidOffset {
         section: &'static str,
         offset: u64,
@@ -760,5 +805,66 @@ mod tests {
 
         // Bloom rejection
         assert!(!reader.might_contain(b"definitely_not_here_xyz"));
+    }
+
+    #[tokio::test]
+    async fn remote_reader_opens_zero_byte_object_as_empty() {
+        use crate::storage::LocalBackend;
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let backend = LocalBackend::new(tmp.path());
+        let path = "degenerate/empty-base.osi";
+
+        // A 0-byte object — what the old index writers PUT for empty bases.
+        backend.put(path, Vec::new()).await.unwrap();
+
+        // Must open (previously: object_size=0 → suffix-range read of 0
+        // bytes → storage error) and behave as an empty segment.
+        let reader = RemoteSegmentReader::open(
+            Box::new(LocalBackend::new(tmp.path())),
+            path.to_string(),
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(reader.key_count(), 0);
+        assert_eq!(reader.get(b"any_key").await.unwrap(), None);
+        assert_eq!(reader.metadata().block_offset_for_key(b"any_key"), None);
+    }
+
+    #[tokio::test]
+    async fn remote_reader_opens_written_empty_segment() {
+        use crate::storage::LocalBackend;
+
+        // The writer-side counterpart: a zero-key segment produced by
+        // finish_allow_empty must open through the remote path and answer
+        // lookups with None. This is the exact shape layered indexes write
+        // as synthesized empty bases.
+        let writer = SegmentWriter::new(SegmentWriterOptions::default());
+        let output = writer.finish_allow_empty().unwrap();
+        assert!(output.data.len() > 0);
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let backend = LocalBackend::new(tmp.path());
+        let path = "indexes/entities-empty-base.osi";
+        backend.put(path, output.data).await.unwrap();
+
+        let reader = RemoteSegmentReader::open(
+            Box::new(LocalBackend::new(tmp.path())),
+            path.to_string(),
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(reader.key_count(), 0);
+        assert_eq!(
+            reader
+                .get(b"fact:tier:entity_names:anything")
+                .await
+                .unwrap(),
+            None
+        );
     }
 }

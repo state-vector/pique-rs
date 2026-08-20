@@ -19,10 +19,10 @@ pub use layered::{
     SegmentRef, TOMBSTONE_MARKER, is_tombstone, merge_segments, tombstone_value,
 };
 pub use reader::{ReaderError, RemoteSegmentReader, SegmentMetadata, SegmentReader};
-pub use storage::{LocalBackend, StorageBackend, StorageError};
 pub use stats::{
     ColumnStats, RangePredicate, RowGroupRef, RowGroupStats, StatsManifest, StatsManifestBuilder,
 };
+pub use storage::{LocalBackend, StorageBackend, StorageError};
 pub use writer::{SegmentOutput, SegmentWriter, SegmentWriterOptions};
 
 #[cfg(feature = "s3")]

@@ -137,11 +137,34 @@ impl SegmentWriter {
     }
 
     /// Finish building the segment. Returns the complete segment bytes and metadata.
-    pub fn finish(mut self) -> Result<SegmentOutput, WriterError> {
+    ///
+    /// Errors if no entries were added — use [`SegmentWriter::finish_allow_empty`]
+    /// when a zero-key segment is intentional (e.g. a synthesized empty base
+    /// for a layered index).
+    pub fn finish(self) -> Result<SegmentOutput, WriterError> {
         if !self.has_entries {
             return Err(WriterError::EmptySegment);
         }
+        self.finish_impl()
+    }
 
+    /// Finish building, allowing a segment with zero keys.
+    ///
+    /// A zero-key segment is structurally valid — no data blocks, an empty
+    /// bloom (length 0), an empty FST, and a footer with `key_count: 0` — and
+    /// opens with every reader type. Layered indexes use such segments as
+    /// synthesized empty bases when all data lives in deltas.
+    ///
+    /// Keep the strict [`SegmentWriter::finish`] as the default: an accidental
+    /// empty build is usually a bug (forgot to add entries); an intentional
+    /// one is declared here.
+    pub fn finish_allow_empty(self) -> Result<SegmentOutput, WriterError> {
+        self.finish_impl()
+    }
+
+    /// Shared body of both finish variants. `self.current_block` is empty when
+    /// no entries were added, so the flush below is a no-op for the empty case.
+    fn finish_impl(mut self) -> Result<SegmentOutput, WriterError> {
         // Flush the last in-progress block
         if !self.current_block.is_empty() {
             self.flush_block();
@@ -258,6 +281,7 @@ pub enum WriterError {
 mod tests {
     use super::*;
     use crate::format::{FOOTER_SIZE, Footer};
+    use crate::reader::SegmentReader;
 
     #[test]
     fn build_simple_segment() {
@@ -315,6 +339,48 @@ mod tests {
         let writer = SegmentWriter::new(SegmentWriterOptions::default());
         let result = writer.finish();
         assert!(matches!(result, Err(WriterError::EmptySegment)));
+    }
+
+    #[test]
+    fn finish_allow_empty_builds_valid_zero_key_segment() {
+        let writer = SegmentWriter::new(SegmentWriterOptions::default());
+        let output = writer.finish_allow_empty().unwrap();
+
+        // Metadata: zero keys, but a structurally present (non-empty) object
+        assert_eq!(output.meta.key_count, 0);
+        assert!(
+            output.meta.size_bytes > 0,
+            "empty segment must not be a 0-byte object"
+        );
+        assert_eq!(output.data.len() as u64, output.meta.size_bytes);
+
+        // Opens in-memory and answers queries correctly
+        let reader = SegmentReader::open(output.data.clone()).unwrap();
+        assert_eq!(reader.key_count(), 0);
+        assert_eq!(reader.get(b"anything").unwrap(), None);
+        assert!(reader.iter().unwrap().is_empty());
+
+        // The footer is well-formed: bloom absent, FST empty-but-present
+        let footer_start = output.data.len() - FOOTER_SIZE;
+        let footer_bytes: &[u8; FOOTER_SIZE] = output.data[footer_start..].try_into().unwrap();
+        let footer = Footer::from_bytes(footer_bytes).unwrap();
+        assert_eq!(footer.key_count, 0);
+        assert_eq!(footer.bloom_length, 0);
+        assert_eq!(footer.data_blocks_length, 0);
+    }
+
+    #[test]
+    fn finish_allow_empty_roundtrips_through_tail_read() {
+        // The remote reader's open path: object_size + tail read + open_from_tail.
+        // A zero-key segment must survive it — this is the wire-format guard
+        // for synthesized empty bases (0-byte objects fail here with 416).
+        let writer = SegmentWriter::new(SegmentWriterOptions::default());
+        let output = writer.finish_allow_empty().unwrap();
+
+        let segment_size = output.data.len() as u64;
+        let meta = SegmentReader::open_from_tail(&output.data, segment_size).unwrap();
+        assert_eq!(meta.key_count(), 0);
+        assert_eq!(meta.block_offset_for_key(b"anything"), None);
     }
 
     #[test]
