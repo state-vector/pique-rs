@@ -9,6 +9,10 @@
 //!    - Request 1 (cold start): tail read (last 256KB) → footer + bloom + FST
 //!    - Request 2 (per lookup): single block range read
 //!
+//!    If the metadata has outgrown the tail budget, cold open pays one extra
+//!    targeted re-read (the exact needed size is computed from the footer
+//!    carried in `TailTooSmall`) instead of failing — see `RemoteSegmentReader::open`.
+//!
 //!    Caches the metadata across lookups so steady-state is 1 request per lookup.
 //!
 //! ## Lookup flow
@@ -23,9 +27,12 @@ use crate::format::{FOOTER_SIZE, FORMAT_VERSION, Footer, FormatError};
 use crate::storage::{StorageBackend, StorageError};
 use fst::{IntoStreamer, Streamer};
 
-/// Default tail read budget — 256KB covers footer + bloom + FST for up to
-/// ~200K keys. The measurement proves reading 256KB costs the same latency
-/// as reading 64 bytes from S3.
+/// Default tail read budget — the fast-path read size, covering footer +
+/// bloom + FST for up to ~200K keys in one request. The measurement proves
+/// reading 256KB costs the same latency as reading 64 bytes from S3.
+///
+/// This is a fast-path size, not a correctness cap: metadata larger than the
+/// budget triggers one exact-size re-read inside `open` rather than an error.
 pub const DEFAULT_TAIL_READ_BUDGET: u64 = 256 * 1024;
 
 // ===========================================================================
@@ -334,11 +341,21 @@ pub struct RemoteSegmentReader {
 }
 
 impl RemoteSegmentReader {
-    /// Open a remote segment. Performs one tail read to load metadata.
+    /// Open a remote segment.
     ///
-    /// The `tail_budget` controls how many bytes to read from the end of the
-    /// object. Defaults to 256KB which covers segments up to ~200K keys.
-    /// If the bloom+FST exceeds this budget, returns `TailTooSmall` error.
+    /// The `tail_budget` is the fast-path read size: the common case loads
+    /// footer + bloom + FST in ONE tail read. When the metadata has outgrown
+    /// the budget, the first parse fails with `TailTooSmall` carrying the
+    /// exact bytes needed (`segment_size - bloom_offset`) — the footer sits
+    /// at the end of the segment, so that number is already known. `open`
+    /// then performs ONE targeted re-read of exactly those bytes, which opens
+    /// any well-formed segment regardless of how large its metadata has
+    /// grown. A second `TailTooSmall` cannot come from sizing (the re-read
+    /// is exact) and surfaces as an error: it means a malformed footer or a
+    /// concurrently rewritten object.
+    ///
+    /// Defaults to 256KB, which covers footer + bloom + FST for up to ~200K
+    /// keys in the single fast-path request.
     pub async fn open(
         backend: Box<dyn StorageBackend>,
         path: String,
@@ -366,7 +383,7 @@ impl RemoteSegmentReader {
             });
         }
 
-        // Read the tail (one request)
+        // Read the tail (one request on the fast path)
         let read_size = budget.min(segment_size);
         let tail = backend
             .read_tail(&path, read_size)
@@ -374,7 +391,23 @@ impl RemoteSegmentReader {
             .map_err(ReaderError::Storage)?;
 
         // Parse metadata from tail
-        let meta = SegmentReader::open_from_tail(&tail, segment_size)?;
+        let meta = match SegmentReader::open_from_tail(&tail, segment_size) {
+            Ok(meta) => meta,
+            Err(ReaderError::TailTooSmall { needed, .. }) => {
+                // The metadata outgrew the budget. `needed` is exact — it is
+                // computed from the footer, which we have already parsed from
+                // the end of the failed tail. One targeted re-read, no loop:
+                // if the exact-size tail still fails, the footer lied and the
+                // error must surface.
+                let reread_size = (needed as u64).min(segment_size);
+                let full_tail = backend
+                    .read_tail(&path, reread_size)
+                    .await
+                    .map_err(ReaderError::Storage)?;
+                SegmentReader::open_from_tail(&full_tail, segment_size)?
+            }
+            Err(e) => return Err(e),
+        };
 
         Ok(Self {
             backend,
@@ -843,7 +876,7 @@ mod tests {
         // as synthesized empty bases.
         let writer = SegmentWriter::new(SegmentWriterOptions::default());
         let output = writer.finish_allow_empty().unwrap();
-        assert!(output.data.len() > 0);
+        assert!(!output.data.is_empty());
 
         let tmp = tempfile::TempDir::new().unwrap();
         let backend = LocalBackend::new(tmp.path());
@@ -865,6 +898,106 @@ mod tests {
                 .await
                 .unwrap(),
             None
+        );
+    }
+
+    /// A segment whose bloom + FST outgrow the tail budget must still open:
+    /// one targeted re-read of exactly the needed bytes, not a `TailTooSmall`
+    /// failure. This is the production failure shape (dev, 2026-09-26): an
+    /// adjacency delta segment's metadata reached 268,890 bytes against the
+    /// 262,144-byte default budget, so EVERY open failed and every graph
+    /// query degraded to the Parquet fallback for days. A small explicit
+    /// budget exercises the identical code path at a testable scale.
+    #[tokio::test]
+    async fn oversized_metadata_reopens_via_targeted_reread() {
+        use crate::storage::LocalBackend;
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let backend = LocalBackend::new(tmp.path());
+        let path = "test/oversized-metadata.osi";
+
+        // Long keys fatten the FST so the metadata comfortably exceeds the
+        // 1 KiB budget used below.
+        let mut writer = SegmentWriter::new(SegmentWriterOptions {
+            block_size: 4096,
+            restart_interval: 16,
+            enable_bloom: true,
+        });
+        for i in 0..2000 {
+            let key = format!(
+                "acme/myproject/src/query/translation.rs/function/execute_query_{:06}",
+                i
+            );
+            writer.add(key.as_bytes(), format!("v{}", i).as_bytes()).unwrap();
+        }
+        let output = writer.finish().unwrap();
+        let footer_start = output.data.len() - crate::format::FOOTER_SIZE;
+        let footer_bytes: &[u8; crate::format::FOOTER_SIZE] =
+            output.data[footer_start..].try_into().unwrap();
+        let footer = crate::format::Footer::from_bytes(footer_bytes).unwrap();
+        let metadata_size = output.data.len() as u64 - footer.bloom_offset;
+        assert!(
+            metadata_size > 1024,
+            "fixture must exceed the probe budget: metadata {} bytes",
+            metadata_size
+        );
+        backend.put(path, output.data).await.unwrap();
+
+        // Old behaviour: `TailTooSmall` and the open fails outright.
+        let reader = RemoteSegmentReader::open(
+            Box::new(LocalBackend::new(tmp.path())),
+            path.to_string(),
+            Some(1024),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(reader.key_count(), 2000);
+        assert_eq!(
+            reader.get(b"acme/myproject/src/query/translation.rs/function/execute_query_000000").await.unwrap(),
+            Some(b"v0".to_vec())
+        );
+        assert_eq!(
+            reader.get(b"acme/myproject/src/query/translation.rs/function/execute_query_001999").await.unwrap(),
+            Some(b"v1999".to_vec())
+        );
+        assert_eq!(
+            reader
+                .get(b"acme/myproject/src/query/translation.rs/function/absent")
+                .await
+                .unwrap(),
+            None
+        );
+    }
+
+    /// Boundary: a budget of exactly `FOOTER_SIZE` reads only the footer —
+    /// parseable, but the bloom starts immediately after the data blocks, so
+    /// the first parse reports `TailTooSmall` and the re-read must recover.
+    /// The re-read size is exact, so a second failure would mean a malformed
+    /// footer, and the error must surface rather than loop.
+    #[tokio::test]
+    async fn footer_only_budget_still_opens() {
+        use crate::storage::LocalBackend;
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let backend = LocalBackend::new(tmp.path());
+        let path = "test/footer-only-budget.osi";
+
+        let data = build_test_segment(500, 2048);
+        backend.put(path, data).await.unwrap();
+
+        let reader = RemoteSegmentReader::open(
+            Box::new(LocalBackend::new(tmp.path())),
+            path.to_string(),
+            Some(crate::format::FOOTER_SIZE as u64),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(reader.key_count(), 500);
+        assert_eq!(
+            reader.get(b"key_000250").await.unwrap(),
+            Some(b"value_000250".to_vec())
         );
     }
 }
