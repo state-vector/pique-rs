@@ -661,7 +661,21 @@ fn is_corruption_false_for_storage_errors() {
 
     let err = ReaderError::Storage(StorageError::NotFound("test".to_string()));
     assert!(!err.is_corruption());
-    assert!(err.is_transient());
+    assert!(
+        !err.is_transient(),
+        "a confirmed missing immutable object needs a new verified view"
+    );
+
+    let io = ReaderError::Storage(StorageError::Io("connection reset".to_string()));
+    assert!(!io.is_corruption());
+    assert!(io.is_transient());
+
+    #[cfg(feature = "s3")]
+    {
+        let service = ReaderError::Storage(StorageError::S3("service unavailable".to_string()));
+        assert!(!service.is_corruption());
+        assert!(service.is_transient());
+    }
 }
 
 #[test]
