@@ -105,6 +105,14 @@ let reader = RemoteSegmentReader::open(
 let result = reader.get(b"user_002").await?;
 ```
 
+S3 reads preserve confirmed absence as `StorageError::NotFound`, including when
+an already-open reader later needs a block from a deleted object. The error
+remains available through `ReaderError`'s source chain and is non-transient for
+that immutable object. Permission, service, transport and body-read failures
+retain their storage-failure classification and diagnostics. A missing object
+is neither an empty index nor corrupt bytes; callers must verify a replacement
+view before reading again.
+
 ## Range-predicate pruning with stats manifests
 
 For range queries (`WHERE ts BETWEEN a AND b`), the bloom filter can't help — it only handles equality. The stats manifest fills this gap by storing per-(file, row_group) column min/max values and answering interval-overlap queries:

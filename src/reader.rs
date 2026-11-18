@@ -592,7 +592,7 @@ pub enum ReaderError {
     TailTooSmall { needed: usize, got: usize },
 
     #[error("Storage error: {0}")]
-    Storage(StorageError),
+    Storage(#[source] StorageError),
 }
 
 impl ReaderError {
@@ -600,8 +600,8 @@ impl ReaderError {
     /// format error, structural damage). The caller should fall back to a
     /// source-of-truth data path.
     ///
-    /// Returns false for I/O errors, network issues, or "not found" conditions
-    /// where retry is appropriate.
+    /// Returns false for storage failures, including a confirmed missing object.
+    /// Missing immutable data is unavailable, not damaged segment bytes.
     pub fn is_corruption(&self) -> bool {
         matches!(
             self,
@@ -620,10 +620,11 @@ impl ReaderError {
         )
     }
 
-    /// Returns true if this is a transient I/O or storage error where retry
-    /// is appropriate.
+    /// Returns true for an unclassified I/O or storage failure. A confirmed
+    /// missing immutable object cannot recover by rereading that same object;
+    /// its owner must select and verify a new view before another read.
     pub fn is_transient(&self) -> bool {
-        matches!(self, ReaderError::Storage(_))
+        matches!(self, ReaderError::Storage(error) if !matches!(error, StorageError::NotFound(_)))
     }
 }
 
@@ -928,7 +929,9 @@ mod tests {
                 "acme/myproject/src/query/translation.rs/function/execute_query_{:06}",
                 i
             );
-            writer.add(key.as_bytes(), format!("v{}", i).as_bytes()).unwrap();
+            writer
+                .add(key.as_bytes(), format!("v{}", i).as_bytes())
+                .unwrap();
         }
         let output = writer.finish().unwrap();
         let footer_start = output.data.len() - crate::format::FOOTER_SIZE;
@@ -954,11 +957,17 @@ mod tests {
 
         assert_eq!(reader.key_count(), 2000);
         assert_eq!(
-            reader.get(b"acme/myproject/src/query/translation.rs/function/execute_query_000000").await.unwrap(),
+            reader
+                .get(b"acme/myproject/src/query/translation.rs/function/execute_query_000000")
+                .await
+                .unwrap(),
             Some(b"v0".to_vec())
         );
         assert_eq!(
-            reader.get(b"acme/myproject/src/query/translation.rs/function/execute_query_001999").await.unwrap(),
+            reader
+                .get(b"acme/myproject/src/query/translation.rs/function/execute_query_001999")
+                .await
+                .unwrap(),
             Some(b"v1999".to_vec())
         );
         assert_eq!(

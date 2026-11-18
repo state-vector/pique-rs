@@ -171,6 +171,38 @@ impl S3Backend {
         let client = aws_sdk_s3::Client::from_conf(s3_config);
         Self { client, bucket }
     }
+
+    fn get_read_error(
+        &self,
+        path: &str,
+        error: aws_sdk_s3::error::SdkError<aws_sdk_s3::operation::get_object::GetObjectError>,
+    ) -> StorageError {
+        let missing = error
+            .as_service_error()
+            .is_some_and(|service| service.is_no_such_key());
+        let detail = format!("s3://{}/{path}: {error:?}", self.bucket);
+        if missing {
+            StorageError::NotFound(detail)
+        } else {
+            StorageError::S3(detail)
+        }
+    }
+
+    fn head_read_error(
+        &self,
+        path: &str,
+        error: aws_sdk_s3::error::SdkError<aws_sdk_s3::operation::head_object::HeadObjectError>,
+    ) -> StorageError {
+        let missing = error
+            .as_service_error()
+            .is_some_and(|service| service.is_not_found());
+        let detail = format!("s3://{}/{path}: {error:?}", self.bucket);
+        if missing {
+            StorageError::NotFound(detail)
+        } else {
+            StorageError::S3(detail)
+        }
+    }
 }
 
 #[cfg(feature = "s3")]
@@ -186,13 +218,12 @@ impl StorageBackend for S3Backend {
             .range(range_header)
             .send()
             .await
-            .map_err(|e| StorageError::S3(format!("{e:#}")))?;
+            .map_err(|e| self.get_read_error(path, e))?;
 
-        let bytes = resp
-            .body
-            .collect()
-            .await
-            .map_err(|e| StorageError::S3(format!("{e:#}")))?;
+        let bytes =
+            resp.body.collect().await.map_err(|e| {
+                StorageError::S3(format!("s3://{}/{path} body: {e:?}", self.bucket))
+            })?;
 
         Ok(bytes.to_vec())
     }
@@ -207,13 +238,12 @@ impl StorageBackend for S3Backend {
             .range(range_header)
             .send()
             .await
-            .map_err(|e| StorageError::S3(format!("{e:#}")))?;
+            .map_err(|e| self.get_read_error(path, e))?;
 
-        let bytes = resp
-            .body
-            .collect()
-            .await
-            .map_err(|e| StorageError::S3(format!("{e:#}")))?;
+        let bytes =
+            resp.body.collect().await.map_err(|e| {
+                StorageError::S3(format!("s3://{}/{path} body: {e:?}", self.bucket))
+            })?;
 
         Ok(bytes.to_vec())
     }
@@ -226,7 +256,7 @@ impl StorageBackend for S3Backend {
             .key(path)
             .send()
             .await
-            .map_err(|e| StorageError::S3(format!("{e:#}")))?;
+            .map_err(|e| self.head_read_error(path, e))?;
 
         Ok(resp.content_length().unwrap_or(0) as u64)
     }
@@ -239,13 +269,12 @@ impl StorageBackend for S3Backend {
             .key(path)
             .send()
             .await
-            .map_err(|e| StorageError::S3(format!("{e:#}")))?;
+            .map_err(|e| self.get_read_error(path, e))?;
 
-        let bytes = resp
-            .body
-            .collect()
-            .await
-            .map_err(|e| StorageError::S3(format!("{e:#}")))?;
+        let bytes =
+            resp.body.collect().await.map_err(|e| {
+                StorageError::S3(format!("s3://{}/{path} body: {e:?}", self.bucket))
+            })?;
 
         Ok(bytes.to_vec())
     }
