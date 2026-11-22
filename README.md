@@ -105,6 +105,18 @@ let reader = RemoteSegmentReader::open(
 let result = reader.get(b"user_002").await?;
 ```
 
+### Compressed data blocks
+
+Readers accept both the uncompressed version 1 format and the version 2 block
+codec. Deploy these readers before using `SegmentWriter::new_compressed` or
+`SecondaryIndexWriter::finish_compressed`. Default writers still emit version 1.
+
+Version 2 compresses each block independently and keeps blocks raw when
+compression would grow them. The footer, bloom filter and FST remain directly
+readable. Each point lookup still fetches at most one data block. If you fetch
+blocks yourself, pass the range response through
+`SegmentMetadata::decode_data_block` before opening it with `BlockReader`.
+
 S3 reads preserve confirmed absence as `StorageError::NotFound`, including when
 an already-open reader later needs a block from a deleted object. The error
 remains available through `ReaderError`'s source chain and is non-transient for

@@ -21,7 +21,9 @@
 //! key → bloom check → FST lookup → block offset → read block → binary search
 //! ```
 
-use crate::block::{BlockError, BlockReader};
+use std::borrow::Cow;
+
+use crate::block::{BlockError, BlockReader, decode_block};
 use crate::bloom;
 use crate::format::{FOOTER_SIZE, FORMAT_VERSION, Footer, FormatError};
 use crate::storage::{StorageBackend, StorageError};
@@ -184,7 +186,7 @@ impl SegmentReader {
 
         // Step 3: Read and search the block
         let block_data = self.read_block(block_offset)?;
-        let reader = BlockReader::open(block_data).map_err(ReaderError::Block)?;
+        let reader = BlockReader::open(&block_data).map_err(ReaderError::Block)?;
 
         match reader.get(key).map_err(ReaderError::Block)? {
             Some(value) => Ok(Some(value.to_vec())),
@@ -218,7 +220,7 @@ impl SegmentReader {
         }
         for &offset in &offsets {
             let block_data = self.read_block(offset)?;
-            let reader = BlockReader::open(block_data).map_err(ReaderError::Block)?;
+            let reader = BlockReader::open(&block_data).map_err(ReaderError::Block)?;
             for entry in reader.iter() {
                 let (key, value) = entry.map_err(ReaderError::Block)?;
                 results.push((key, value.to_vec()));
@@ -227,14 +229,17 @@ impl SegmentReader {
         Ok(results)
     }
 
-    fn read_block(&self, offset: u64) -> Result<&[u8], ReaderError> {
+    fn read_block(&self, offset: u64) -> Result<Cow<'_, [u8]>, ReaderError> {
         let start = offset as usize;
         let data_end = self.footer.data_blocks_length as usize;
         if start >= data_end {
             return Err(ReaderError::InvalidBlockOffset(offset));
         }
         let end = find_block_end(&self.fst, offset, data_end);
-        Ok(&self.data[start..end])
+        Ok(decode_block(
+            self.footer.format_version,
+            &self.data[start..end],
+        )?)
     }
 }
 
@@ -309,6 +314,13 @@ impl SegmentMetadata {
         }
         let end = find_block_end(&self.fst, block_offset, data_end);
         Some((block_offset, end as u64))
+    }
+
+    /// Decode one independently fetched block. Pass the result to
+    /// [`BlockReader::open`] to verify its checksum and read its entries.
+    /// Raw blocks can be read without copying the range response.
+    pub fn decode_data_block<'a>(&self, bytes: &'a [u8]) -> Result<Cow<'a, [u8]>, ReaderError> {
+        Ok(decode_block(self.footer.format_version, bytes)?)
     }
 
     /// Number of keys.
@@ -444,7 +456,8 @@ impl RemoteSegmentReader {
             .map_err(ReaderError::Storage)?;
 
         // Decode block and binary search
-        let reader = BlockReader::open(&block_data).map_err(ReaderError::Block)?;
+        let block = self.meta.decode_data_block(&block_data)?;
+        let reader = BlockReader::open(&block).map_err(ReaderError::Block)?;
         match reader.get(key).map_err(ReaderError::Block)? {
             Some(value) => Ok(Some(value.to_vec())),
             None => Ok(None),
@@ -611,6 +624,7 @@ impl ReaderError {
                 | ReaderError::Format(FormatError::UnsupportedVersion(_))
                 | ReaderError::Block(BlockError::ChecksumMismatch)
                 | ReaderError::Block(BlockError::BlockTooSmall)
+                | ReaderError::Block(BlockError::InvalidEncoding)
                 | ReaderError::Block(BlockError::InvalidVarint)
                 | ReaderError::Block(BlockError::CorruptedEntry)
                 | ReaderError::Block(BlockError::UnexpectedEof)

@@ -41,6 +41,9 @@ async-trait = "0.1"
 aws-sdk-s3 = { version = "1", optional = true }
 aws-config = { version = "1", optional = true }
 
+# Compress independently ranged data blocks without a native library.
+miniz_oxide = "0.8"
+
 # CRC32 checksums for block integrity
 crc32fast = "1"
 

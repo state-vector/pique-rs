@@ -256,3 +256,48 @@ async fn healthy_reads_and_cached_reader_deletion_preserve_the_actual_cause() {
         "storage attribution must survive the reader"
     );
 }
+
+#[tokio::test]
+async fn compressed_blocks_keep_the_same_point_read_request_count() {
+    let value = b"s3://lodestar/tenants/org/repo=owner%2Frepo/shard.parquet".repeat(5);
+    let options = SegmentWriterOptions {
+        block_size: 4096,
+        ..Default::default()
+    };
+    let mut observed = Vec::new();
+    for mut writer in [
+        SegmentWriter::new(options.clone()),
+        SegmentWriter::new_compressed(options),
+    ] {
+        for index in 0..200 {
+            writer
+                .add(format!("key-{index:03}").as_bytes(), &value)
+                .unwrap();
+        }
+        let data = writer.finish().unwrap().data;
+        let size = data.len();
+        let fixture = Fixture::new(Response::Object(data)).await;
+        let reader =
+            RemoteSegmentReader::open(Box::new(fixture.backend()), "immutable.osi".into(), None)
+                .await
+                .unwrap();
+        for key in [b"key-000", b"key-100", b"key-199"] {
+            assert_eq!(
+                reader.get(key).await.unwrap().as_deref(),
+                Some(value.as_slice())
+            );
+        }
+        let requests = fixture.requests.lock().unwrap();
+        let heads = requests
+            .iter()
+            .filter(|line| line.starts_with("HEAD "))
+            .count();
+        let gets = requests
+            .iter()
+            .filter(|line| line.starts_with("GET "))
+            .count();
+        assert_eq!((heads, gets), (1, 4), "one tail and one range per lookup");
+        observed.push(size);
+    }
+    assert!(observed[1] * 4 < observed[0]);
+}

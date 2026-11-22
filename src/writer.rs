@@ -15,10 +15,11 @@
 //! // output.meta contains segment metadata for the manifest
 //! ```
 
-use crate::block::TrackedBlockBuilder;
+use crate::block::{TrackedBlockBuilder, append_encoded_block};
 use crate::bloom;
 use crate::format::{
-    DEFAULT_BLOCK_SIZE, DEFAULT_RESTART_INTERVAL, FORMAT_VERSION, Footer, SegmentMeta,
+    BLOCK_CODEC_VERSION, DEFAULT_BLOCK_SIZE, DEFAULT_RESTART_INTERVAL, FORMAT_VERSION, Footer,
+    SegmentMeta,
 };
 
 /// Options for the segment writer.
@@ -53,6 +54,7 @@ pub struct SegmentOutput {
 /// Builds an immutable segment from sorted key→value pairs.
 pub struct SegmentWriter {
     opts: SegmentWriterOptions,
+    format_version: u16,
     /// Finished data blocks (concatenated bytes).
     data_blocks: Vec<u8>,
     /// FST builder entries: (last_key_in_block, block_offset).
@@ -80,10 +82,21 @@ pub struct SegmentWriter {
 impl SegmentWriter {
     /// Create a new segment writer with the given options.
     pub fn new(opts: SegmentWriterOptions) -> Self {
+        Self::with_format(opts, FORMAT_VERSION)
+    }
+
+    /// Encode independently compressed blocks. Readers must support version 2
+    /// before the resulting segments are published.
+    pub fn new_compressed(opts: SegmentWriterOptions) -> Self {
+        Self::with_format(opts, BLOCK_CODEC_VERSION)
+    }
+
+    fn with_format(opts: SegmentWriterOptions, format_version: u16) -> Self {
         let block_size = opts.block_size;
         let restart_interval = opts.restart_interval;
         Self {
             opts,
+            format_version,
             data_blocks: Vec::new(),
             fst_entries: Vec::new(),
             all_keys: Vec::new(),
@@ -189,7 +202,7 @@ impl SegmentWriter {
         let fst_len = fst_bytes.len() as u64;
 
         let footer = Footer {
-            format_version: FORMAT_VERSION,
+            format_version: self.format_version,
             data_blocks_offset: 0,
             data_blocks_length: data_blocks_len,
             bloom_offset,
@@ -234,14 +247,17 @@ impl SegmentWriter {
         );
 
         let (block_bytes, _first_key, last_key) = old_block.finish();
-
         // Record for FST: last_key → block_offset
         // During lookup: FST.range().ge(target_key) gives us the block whose
         // last_key >= target_key, which is the block that might contain it.
         self.fst_entries.push((last_key, block_offset));
 
-        self.current_offset += block_bytes.len() as u64;
-        self.data_blocks.extend_from_slice(&block_bytes);
+        if self.format_version == BLOCK_CODEC_VERSION {
+            append_encoded_block(&block_bytes, &mut self.data_blocks);
+        } else {
+            self.data_blocks.extend_from_slice(&block_bytes);
+        }
+        self.current_offset = self.data_blocks.len() as u64;
     }
 
     /// Build the FST from accumulated (last_key, block_offset) entries.

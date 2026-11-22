@@ -101,11 +101,21 @@ impl SecondaryIndexWriter {
     ///
     /// Returns an error if no keys were added.
     pub fn finish(self) -> Result<SegmentOutput, WriterError> {
+        let writer = SegmentWriter::new(self.opts.segment_options.clone());
+        self.finish_with(writer)
+    }
+
+    /// Build a segment with independently compressed blocks. Publish it
+    /// only after every reader supports version 2.
+    pub fn finish_compressed(self) -> Result<SegmentOutput, WriterError> {
+        let writer = SegmentWriter::new_compressed(self.opts.segment_options.clone());
+        self.finish_with(writer)
+    }
+
+    fn finish_with(self, mut writer: SegmentWriter) -> Result<SegmentOutput, WriterError> {
         if self.entries.is_empty() {
             return Err(WriterError::EmptySegment);
         }
-
-        let mut writer = SegmentWriter::new(self.opts.segment_options);
 
         // BTreeMap iteration is already sorted
         for (key, locations) in &self.entries {
