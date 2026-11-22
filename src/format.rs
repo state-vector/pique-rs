@@ -15,8 +15,15 @@ use serde::{Deserialize, Serialize};
 /// ASCII "S3IX" followed by version-specific padding.
 pub const MAGIC: [u8; 4] = [0x53, 0x33, 0x49, 0x58]; // "S3IX"
 
-/// Current format version. Increment on breaking format changes.
+/// The default uncompressed segment format.
 pub const FORMAT_VERSION: u16 = 1;
+
+/// Opt-in format with individually encoded blocks. The rest of the segment
+/// uses the version 1 layout. Block offsets refer to encoded byte ranges.
+/// A block starts with 0 followed by legacy bytes or 1 followed by its
+/// four-byte little-endian decoded length and a zlib stream. The decoded
+/// blocks retain the original CRC and entry layout.
+pub const BLOCK_CODEC_VERSION: u16 = 2;
 
 /// Fixed footer size in bytes.
 pub const FOOTER_SIZE: usize = 64;
@@ -88,7 +95,7 @@ impl Footer {
         }
 
         let format_version = u16::from_le_bytes([buf[4], buf[5]]);
-        if format_version != FORMAT_VERSION {
+        if !matches!(format_version, FORMAT_VERSION | BLOCK_CODEC_VERSION) {
             return Err(FormatError::UnsupportedVersion(format_version));
         }
 

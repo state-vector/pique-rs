@@ -32,6 +32,59 @@
 //!
 //! At restart points, `shared_prefix_len` is always 0 (full key stored).
 
+// Version 2 data block envelopes.
+
+/// Large individual values already use raw blocks. Bound the expanded size
+/// of compressed blocks independently of the length of the wire payload.
+const MAX_COMPRESSED_BLOCK_SIZE: usize = 4 * 1024 * 1024;
+const RAW_BLOCK: u8 = 0;
+const ZLIB_BLOCK: u8 = 1;
+
+pub(crate) fn append_encoded_block(block: &[u8], output: &mut Vec<u8>) {
+    if block.len() <= MAX_COMPRESSED_BLOCK_SIZE {
+        // Fast compression is enough for repeated paths and edges.
+        let compressed = miniz_oxide::deflate::compress_to_vec_zlib(block, 1);
+        if compressed.len() + 4 < block.len() {
+            output.push(ZLIB_BLOCK);
+            output.extend_from_slice(&(block.len() as u32).to_le_bytes());
+            output.extend_from_slice(&compressed);
+            return;
+        }
+    }
+    output.push(RAW_BLOCK);
+    output.extend_from_slice(block);
+}
+
+pub(crate) fn decode_block(
+    version: u16,
+    block: &[u8],
+) -> Result<std::borrow::Cow<'_, [u8]>, BlockError> {
+    use std::borrow::Cow;
+
+    if version == crate::format::FORMAT_VERSION {
+        return Ok(Cow::Borrowed(block));
+    }
+    if version != crate::format::BLOCK_CODEC_VERSION {
+        return Err(BlockError::InvalidEncoding);
+    }
+    match block.split_first() {
+        Some((&RAW_BLOCK, raw)) => Ok(Cow::Borrowed(raw)),
+        Some((&ZLIB_BLOCK, [a, b, c, d, compressed @ ..])) => {
+            let len = u32::from_le_bytes([*a, *b, *c, *d]) as usize;
+            if len == 0 || len > MAX_COMPRESSED_BLOCK_SIZE {
+                return Err(BlockError::InvalidEncoding);
+            }
+            let decoded = miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(compressed, len)
+                .map_err(|_| BlockError::InvalidEncoding)?;
+            if decoded.len() != len {
+                return Err(BlockError::InvalidEncoding);
+            }
+            Ok(Cow::Owned(decoded))
+        }
+        _ => Err(BlockError::InvalidEncoding),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Varint encoding (LEB128 unsigned)
 // ---------------------------------------------------------------------------
@@ -499,6 +552,9 @@ fn shared_prefix_len(a: &[u8], b: &[u8]) -> usize {
 
 #[derive(Debug, thiserror::Error)]
 pub enum BlockError {
+    #[error("Invalid compressed block encoding")]
+    InvalidEncoding,
+
     #[error("Block too small to contain valid data")]
     BlockTooSmall,
 
